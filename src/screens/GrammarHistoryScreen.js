@@ -1,10 +1,31 @@
-import React, { useState, useEffect } from 'react';
+import React, {
+  useState,
+  useEffect,
+} from 'react';
+
+import {
+  StyleSheet,
+  Text,
+  View,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  ImageBackground,
+  Alert,
+  Platform,
+} from 'react-native';
+
 import { supabase } from '../api/supabase';
+
+const BACKGROUND_IMAGE = require('../../assets/tutor_girl.png.png');
 
 export default function GrammarHistoryScreen() {
   const [loading, setLoading] = useState(true);
-  const [corrections, setCorrections] = useState([]);
-  const [filter, setFilter] = useState('ALL');
+  const [corrections, setCorrections] =
+    useState([]);
+
+  const [filter, setFilter] =
+    useState('ALL');
 
   useEffect(() => {
     fetchCorrections();
@@ -13,35 +34,74 @@ export default function GrammarHistoryScreen() {
   async function fetchCorrections() {
     try {
       setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
 
-      const { data, error } = await supabase
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError) {
+        console.log(
+          'History auth error:',
+          authError.message
+        );
+      }
+
+      if (!user) {
+        setCorrections([]);
+        return;
+      }
+
+      const {
+        data,
+        error,
+      } = await supabase
         .from('grammar_history')
         .select('*')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', {
+          ascending: false,
+        });
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       const formattedList = [];
+
       if (data) {
         data.forEach((item) => {
-          const hasCorrection = Boolean(item.corrected_text && item.corrected_text.trim() !== '');
+          const hasCorrection = Boolean(
+            item.corrected_text &&
+              item.corrected_text.trim() !== ''
+          );
+
           formattedList.push({
             id: item.id,
-            originalText: item.original_text || '',
-            correctedText: item.corrected_text || '',
-            explanation: item.explanation || '',
-            hasCorrection: hasCorrection,
-            createdAt: item.created_at,
+
+            originalText:
+              item.original_text || '',
+
+            correctedText:
+              item.corrected_text || '',
+
+            explanation:
+              item.explanation || '',
+
+            hasCorrection,
+
+            createdAt:
+              item.created_at,
           });
         });
       }
 
       setCorrections(formattedList);
     } catch (err) {
-      console.error('Error fetching history:', err);
+      console.error(
+        'Error fetching history:',
+        err
+      );
     } finally {
       setLoading(false);
     }
@@ -49,265 +109,616 @@ export default function GrammarHistoryScreen() {
 
   async function deleteItem(id) {
     try {
-      setCorrections((prev) => prev.filter((item) => item.id !== id));
+      setCorrections((prev) =>
+        prev.filter(
+          (item) => item.id !== id
+        )
+      );
 
-      const { error } = await supabase
-        .from('grammar_history')
-        .delete()
-        .eq('id', id);
+      const { error } =
+        await supabase
+          .from('grammar_history')
+          .delete()
+          .eq('id', id);
 
       if (error) {
-        console.error('Supabase delete error:', error.message);
-        alert('Failed to delete from database: ' + error.message);
+        console.error(
+          'Supabase delete error:',
+          error.message
+        );
+
+        showMessage(
+          'Failed to delete from database: ' +
+            error.message
+        );
+
         fetchCorrections();
       }
     } catch (err) {
-      console.error('Delete exception:', err);
-      alert('Failed to delete item due to an error.');
+      console.error(
+        'Delete exception:',
+        err
+      );
+
+      showMessage(
+        'Failed to delete item due to an error.'
+      );
+
       fetchCorrections();
     }
   }
 
-  const filteredCorrections = corrections.filter(item => {
-    if (filter === 'MISTAKES') return item.hasCorrection;
-    if (filter === 'TIPS') return !item.hasCorrection && item.explanation;
-    return true;
-  });
+  function showMessage(message) {
+    if (Platform.OS === 'web') {
+      window.alert(message);
+    } else {
+      Alert.alert(
+        'AI Tutor',
+        message
+      );
+    }
+  }
+
+  function confirmDelete(id) {
+    if (Platform.OS === 'web') {
+      const confirmed =
+        window.confirm(
+          'Delete this grammar record?'
+        );
+
+      if (confirmed) {
+        deleteItem(id);
+      }
+
+      return;
+    }
+
+    Alert.alert(
+      'Delete Record',
+      'Are you sure you want to delete this grammar record?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => deleteItem(id),
+        },
+      ]
+    );
+  }
+
+  const filteredCorrections =
+    corrections.filter((item) => {
+      if (filter === 'MISTAKES') {
+        return item.hasCorrection;
+      }
+
+      if (filter === 'TIPS') {
+        return (
+          !item.hasCorrection &&
+          item.explanation
+        );
+      }
+
+      return true;
+    });
 
   if (loading) {
     return (
-      <div style={styles.loaderContainer}>
-        <div style={styles.spinner} />
-      </div>
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator
+          size="large"
+          color="#FFCB9A"
+        />
+
+        <Text style={styles.loadingText}>
+          Loading learning history...
+        </Text>
+      </View>
     );
   }
 
   return (
-    <div style={styles.backgroundImage}>
-      <div style={styles.bgImageWrapper}>
-        <img src={require('../../assets/tutor_girl.png.png')} style={styles.bgImageStyle} alt="Background" />
-        <div style={styles.bgOverlay} />
-      </div>
-
-      <div style={styles.container}>
-        <div style={styles.headerRow}>
-          <h1 style={styles.headerTitle}>Grammar & Learning History</h1>
-          <button style={styles.refreshButton} onClick={fetchCorrections}>🔄 Refresh</button>
-        </div>
-
-        <div style={styles.filterRow}>
-          <button 
-            style={{...styles.filterChip, ...(filter === 'ALL' && styles.activeFilterChip)}} 
-            onClick={() => setFilter('ALL')}
+    <View style={styles.background}>
+      <ImageBackground
+        source={BACKGROUND_IMAGE}
+        resizeMode="cover"
+        style={styles.backgroundImage}
+      >
+        <View style={styles.bgOverlay}>
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={
+              styles.scrollContent
+            }
+            showsVerticalScrollIndicator={true}
           >
-            <span style={{...styles.filterText, ...(filter === 'ALL' && styles.activeFilterText)}}>All</span>
-          </button>
-          <button 
-            style={{...styles.filterChip, ...(filter === 'MISTAKES' && styles.activeFilterChip)}} 
-            onClick={() => setFilter('MISTAKES')}
-          >
-            <span style={{...styles.filterText, ...(filter === 'MISTAKES' && styles.activeFilterText)}}>Corrections</span>
-          </button>
-          <button 
-            style={{...styles.filterChip, ...(filter === 'TIPS' && styles.activeFilterChip)}} 
-            onClick={() => setFilter('TIPS')}
-          >
-            <span style={{...styles.filterText, ...(filter === 'TIPS' && styles.activeFilterText)}}>Tips</span>
-          </button>
-        </div>
+            <View style={styles.container}>
+              {/* HEADER */}
+              <View style={styles.headerRow}>
+                <Text
+                  style={styles.headerTitle}
+                >
+                  Grammar & Learning History
+                </Text>
 
-        {filteredCorrections.length === 0 ? (
-          <div style={styles.emptyContainer}>
-            <p style={styles.emptyText}>No grammar records found yet. Chat with the tutor to log corrections!</p>
-          </div>
-        ) : (
-          <div style={styles.listContainer}>
-            {filteredCorrections.map((item) => (
-              <div key={item.id} style={styles.card}>
-                <div style={styles.cardHeader}>
-                  <span style={styles.cardBadge}>
-                    {item.hasCorrection ? '⚠️ Grammar Correction' : '💡 Tutor Tip'}
-                  </span>
-                  <button onClick={() => deleteItem(item.id)} style={styles.deleteButton} title="Delete">
-                    🗑️
-                  </button>
-                </div>
+                <TouchableOpacity
+                  style={
+                    styles.refreshButton
+                  }
+                  onPress={fetchCorrections}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={
+                      styles.refreshButtonText
+                    }
+                  >
+                    🔄 Refresh
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
-                {item.originalText ? <p style={styles.errorText}>❌ {item.originalText}</p> : null}
-                {item.correctedText ? <p style={styles.fixedText}>✅ {item.correctedText}</p> : null}
-                {item.explanation ? <p style={styles.explanationText}>ℹ️ {item.explanation}</p> : null}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+              {/* FILTERS */}
+              <View style={styles.filterRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.filterChip,
+                    filter === 'ALL' &&
+                      styles.activeFilterChip,
+                  ]}
+                  onPress={() =>
+                    setFilter('ALL')
+                  }
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.filterText,
+                      filter === 'ALL' &&
+                        styles.activeFilterText,
+                    ]}
+                  >
+                    All
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.filterChip,
+                    filter === 'MISTAKES' &&
+                      styles.activeFilterChip,
+                  ]}
+                  onPress={() =>
+                    setFilter('MISTAKES')
+                  }
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.filterText,
+                      filter === 'MISTAKES' &&
+                        styles.activeFilterText,
+                    ]}
+                  >
+                    Corrections
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.filterChip,
+                    filter === 'TIPS' &&
+                      styles.activeFilterChip,
+                  ]}
+                  onPress={() =>
+                    setFilter('TIPS')
+                  }
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.filterText,
+                      filter === 'TIPS' &&
+                        styles.activeFilterText,
+                    ]}
+                  >
+                    Tips
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* EMPTY */}
+              {filteredCorrections.length ===
+              0 ? (
+                <View
+                  style={
+                    styles.emptyContainer
+                  }
+                >
+                  <Text
+                    style={styles.emptyIcon}
+                  >
+                    📚
+                  </Text>
+
+                  <Text
+                    style={styles.emptyText}
+                  >
+                    No grammar records found
+                    yet.
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.emptySubText
+                    }
+                  >
+                    Chat with the tutor to log
+                    corrections!
+                  </Text>
+                </View>
+              ) : (
+                <View
+                  style={
+                    styles.listContainer
+                  }
+                >
+                  {filteredCorrections.map(
+                    (item) => (
+                      <View
+                        key={item.id}
+                        style={styles.card}
+                      >
+                        {/* CARD HEADER */}
+                        <View
+                          style={
+                            styles.cardHeader
+                          }
+                        >
+                          <Text
+                            style={
+                              styles.cardBadge
+                            }
+                          >
+                            {item.hasCorrection
+                              ? '⚠️ Grammar Correction'
+                              : '💡 Tutor Tip'}
+                          </Text>
+
+                          <TouchableOpacity
+                            onPress={() =>
+                              confirmDelete(
+                                item.id
+                              )
+                            }
+                            style={
+                              styles.deleteButton
+                            }
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={
+                                styles.deleteButtonText
+                              }
+                            >
+                              🗑️
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* ORIGINAL */}
+                        {item.originalText ? (
+                          <Text
+                            style={
+                              styles.errorText
+                            }
+                          >
+                            ❌{' '}
+                            {item.originalText}
+                          </Text>
+                        ) : null}
+
+                        {/* CORRECTED */}
+                        {item.correctedText ? (
+                          <Text
+                            style={
+                              styles.fixedText
+                            }
+                          >
+                            ✅{' '}
+                            {item.correctedText}
+                          </Text>
+                        ) : null}
+
+                        {/* EXPLANATION */}
+                        {item.explanation ? (
+                          <Text
+                            style={
+                              styles.explanationText
+                            }
+                          >
+                            ℹ️{' '}
+                            {item.explanation}
+                          </Text>
+                        ) : null}
+                      </View>
+                    )
+                  )}
+                </View>
+              )}
+            </View>
+          </ScrollView>
+        </View>
+      </ImageBackground>
+    </View>
   );
 }
 
-const styles = {
+const styles = StyleSheet.create({
+  background: {
+    flex: 1,
+    backgroundColor: '#0F1715',
+  },
+
   backgroundImage: {
-    minHeight: '100vh',
-    height: '100vh', // 👈 Fixed height to viewport
-    overflowY: 'auto', // 👈 Enables smooth vertical scrolling
-    backgroundColor: '#0F1715',
-    position: 'relative',
-    padding: '24px 16px 80px 16px', // 👈 Extra bottom padding so last card is fully visible
-    boxSizing: 'border-box',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-  },
-  bgImageWrapper: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    width: '100vw',
-    height: '100vh',
-    zIndex: 0,
-    pointerEvents: 'none',
-    overflow: 'hidden',
-  },
-  bgImageStyle: {
+    flex: 1,
     width: '100%',
     height: '100%',
-    objectFit: 'cover',
-    filter: 'none',
-    transform: 'scale(1)',
   },
+
   bgOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    backgroundColor: 'rgba(15, 23, 21, 0.45)',
+    flex: 1,
+    backgroundColor:
+      'rgba(15, 23, 21, 0.45)',
   },
+
+  scrollView: {
+    flex: 1,
+  },
+
+  scrollContent: {
+    paddingBottom: 80,
+  },
+
   loaderContainer: {
-    minHeight: '100vh',
+    flex: 1,
+
     backgroundColor: '#0F1715',
-    display: 'flex',
+
     justifyContent: 'center',
     alignItems: 'center',
   },
-  spinner: {
-    width: '40px',
-    height: '40px',
-    border: '4px solid rgba(255, 203, 154, 0.2)',
-    borderTop: '4px solid #FFCB9A',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite',
+
+  loadingText: {
+    color: '#D1E8E2',
+    marginTop: 12,
+    fontSize: 14,
   },
+
   container: {
-    maxWidth: '800px',
-    margin: '0 auto',
-    position: 'relative',
-    zIndex: 1,
+    width: '100%',
+    maxWidth: 800,
+
+    alignSelf: 'center',
+
+    paddingHorizontal: 16,
+    paddingTop: 24,
+    paddingBottom: 80,
   },
+
   headerRow: {
-    display: 'flex',
+    flexDirection: 'row',
+
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '20px',
-    marginTop: '10px',
+
+    marginBottom: 20,
+    marginTop: 10,
   },
+
   headerTitle: {
-    color: '#ffffff',
-    fontSize: '24px',
+    color: '#FFFFFF',
+
+    fontSize: 24,
     fontWeight: '800',
+
+    flex: 1,
+
+    marginRight: 12,
   },
+
   refreshButton: {
     backgroundColor: '#116466',
+
+    borderWidth: 1,
+    borderColor: '#FFCB9A',
+
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+
+    borderRadius: 8,
+
+    ...(Platform.OS === 'web'
+      ? {
+          cursor: 'pointer',
+        }
+      : {}),
+  },
+
+  refreshButtonText: {
     color: '#FFCB9A',
-    border: '1px solid #FFCB9A',
-    padding: '6px 12px',
-    borderRadius: '8px',
-    cursor: 'pointer',
+
     fontWeight: 'bold',
-    fontSize: '12px',
+    fontSize: 12,
   },
+
   filterRow: {
-    display: 'flex',
-    gap: '10px',
-    marginBottom: '24px',
+    flexDirection: 'row',
     flexWrap: 'wrap',
+
+    marginBottom: 24,
   },
+
   filterChip: {
-    backgroundColor: 'rgba(11, 29, 27, 0.9)',
-    padding: '8px 18px',
-    borderRadius: '12px',
-    border: '1.5px solid #116466',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
+    backgroundColor:
+      'rgba(11, 29, 27, 0.9)',
+
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+
+    borderRadius: 12,
+
+    borderWidth: 1.5,
+    borderColor: '#116466',
+
+    marginRight: 10,
+    marginBottom: 8,
+
+    ...(Platform.OS === 'web'
+      ? {
+          cursor: 'pointer',
+        }
+      : {}),
   },
+
   activeFilterChip: {
     backgroundColor: '#116466',
     borderColor: '#FFCB9A',
   },
+
   filterText: {
     color: '#D1E8E2',
-    fontSize: '14px',
+    fontSize: 14,
     fontWeight: '600',
   },
+
   activeFilterText: {
     color: '#FFCB9A',
   },
+
   emptyContainer: {
-    textAlign: 'center',
-    marginTop: '60px',
+    alignItems: 'center',
+
+    marginTop: 60,
+
+    paddingHorizontal: 20,
   },
+
+  emptyIcon: {
+    fontSize: 42,
+    marginBottom: 14,
+  },
+
   emptyText: {
     color: '#D1E8E2',
-    fontSize: '15px',
+
+    fontSize: 16,
+    fontWeight: '700',
+
+    textAlign: 'center',
   },
+
+  emptySubText: {
+    color: '#8FA39D',
+
+    fontSize: 14,
+
+    textAlign: 'center',
+
+    marginTop: 8,
+  },
+
   listContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
-    paddingBottom: '40px',
+    width: '100%',
   },
+
   card: {
-    backgroundColor: 'rgba(24, 44, 37, 0.95)',
-    borderRadius: '16px',
-    padding: '20px',
-    border: '1.5px solid #116466',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+    backgroundColor:
+      'rgba(24, 44, 37, 0.95)',
+
+    borderRadius: 16,
+
+    padding: 20,
+
+    borderWidth: 1.5,
+    borderColor: '#116466',
+
+    marginBottom: 16,
+
+    elevation: 5,
   },
+
   cardHeader: {
-    display: 'flex',
+    flexDirection: 'row',
+
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '12px',
+
+    marginBottom: 12,
   },
+
   cardBadge: {
     color: '#FFCB9A',
-    fontSize: '12px',
+
+    fontSize: 12,
     fontWeight: '700',
-    letterSpacing: '0.5px',
+
+    letterSpacing: 0.5,
+
+    flex: 1,
   },
+
   deleteButton: {
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: '15px',
-    padding: '4px',
-    borderRadius: '6px',
+    backgroundColor: 'transparent',
+
+    padding: 5,
+
+    borderRadius: 6,
+
+    ...(Platform.OS === 'web'
+      ? {
+          cursor: 'pointer',
+        }
+      : {}),
   },
+
+  deleteButtonText: {
+    fontSize: 15,
+  },
+
   errorText: {
     color: '#f87171',
-    fontSize: '15px',
-    marginBottom: '8px',
-    lineHeight: '22px',
+
+    fontSize: 15,
+
+    marginBottom: 8,
+
+    lineHeight: 22,
+
     fontWeight: '600',
   },
+
   fixedText: {
     color: '#4ade80',
-    fontSize: '15px',
+
+    fontSize: 15,
+
     fontWeight: '700',
-    marginBottom: '10px',
-    lineHeight: '22px',
+
+    marginBottom: 10,
+
+    lineHeight: 22,
   },
+
   explanationText: {
     color: '#FFFFFF',
-    fontSize: '14px',
-    lineHeight: '20px',
+
+    fontSize: 14,
+
+    lineHeight: 20,
   },
-};
+});
