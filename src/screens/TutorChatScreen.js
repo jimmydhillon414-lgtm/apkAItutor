@@ -1836,8 +1836,34 @@ export default function TutorChatScreen({
         );
 
       if (error) {
-        throw error;
-      }
+  console.log('========================================');
+  console.log('❌ SUPABASE EDGE FUNCTION ERROR');
+  console.log('Error name:', error?.name);
+  console.log('Error message:', error?.message);
+  console.log('Error status:', error?.status);
+  console.log('Error context:', error?.context);
+  console.log('Error details:', error?.details);
+
+  try {
+    if (error?.context) {
+      const responseText = await error.context.text();
+
+      console.log(
+        'Edge Function HTTP response:',
+        responseText
+      );
+    }
+  } catch (readError) {
+    console.log(
+      'Could not read Edge Function error response:',
+      readError?.message || readError
+    );
+  }
+
+  console.log('========================================');
+
+  throw error;
+}
 
       if (
         !data ||
