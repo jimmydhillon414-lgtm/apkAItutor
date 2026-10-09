@@ -26,6 +26,13 @@ import {
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
 
+import {
+  useAudioRecorder,
+  RecordingPresets,
+  AudioModule,
+  setAudioModeAsync,
+} from 'expo-audio';
+
 import { supabase } from '../api/supabase';
 
 
@@ -51,7 +58,9 @@ const LANGUAGE_CODES = {
 };
 
 const getLanguageCode = (language) => {
-  if (!language) return 'en-IN';
+  if (!language) {
+    return 'en-IN';
+  }
 
   return LANGUAGE_CODES[language] || 'en-IN';
 };
@@ -65,31 +74,36 @@ const ROLEPLAY_SCENARIOS = {
   introduction: {
     title: 'Introduction',
     icon: '👋',
-    objective: 'Introduce yourself and have a basic conversation.',
+    objective:
+      'Introduce yourself and have a basic conversation.',
   },
 
   travel: {
     title: 'Travel',
     icon: '✈️',
-    objective: 'Practice useful conversations while travelling.',
+    objective:
+      'Practice useful conversations while travelling.',
   },
 
   restaurant: {
     title: 'Restaurant',
     icon: '🍽️',
-    objective: 'Practice ordering food and speaking with restaurant staff.',
+    objective:
+      'Practice ordering food and speaking with restaurant staff.',
   },
 
   job: {
     title: 'Job Interview',
     icon: '💼',
-    objective: 'Practice answering common job interview questions.',
+    objective:
+      'Practice answering common job interview questions.',
   },
 
   shopping: {
     title: 'Shopping',
     icon: '🛍️',
-    objective: 'Practice conversations while shopping.',
+    objective:
+      'Practice conversations while shopping.',
   },
 };
 
@@ -106,95 +120,247 @@ export default function TutorChatScreen({
   // DAY
   // ----------------------------------------------------------
 
-  const currentDayNum = Number(selectedDay) || 1;
+  const currentDayNum =
+    Number(selectedDay) || 1;
 
 
   // ----------------------------------------------------------
   // STATE
   // ----------------------------------------------------------
 
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] =
+    useState([]);
 
-  const [input, setInput] = useState('');
+  const [input, setInput] =
+    useState('');
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] =
+    useState(false);
 
-  const [listening, setListening] = useState(false);
+  const [listening, setListening] =
+    useState(false);
 
-  const [isSessionActive, setIsSessionActive] = useState(false);
+  const [isSessionActive, setIsSessionActive] =
+    useState(false);
 
-  const [speechLang, setSpeechLang] = useState('en-IN');
+  const [speechLang, setSpeechLang] =
+    useState('en-IN');
 
-  const [speakingId, setSpeakingId] = useState(null);
+  const [speakingId, setSpeakingId] =
+    useState(null);
 
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPlaying, setIsPlaying] =
+    useState(false);
 
-  const [availableVoices, setAvailableVoices] = useState([]);
+  const [availableVoices, setAvailableVoices] =
+    useState([]);
 
-  const [showVoiceModal, setShowVoiceModal] = useState(false);
+  const [showVoiceModal, setShowVoiceModal] =
+    useState(false);
 
-  const [voiceError, setVoiceError] = useState('');
+  const [voiceError, setVoiceError] =
+    useState('');
 
-  const [interimTranscript, setInterimTranscript] = useState('');
+  const [interimTranscript, setInterimTranscript] =
+    useState('');
 
   const [selectedScenario, setSelectedScenario] =
     useState('introduction');
+
+  // Raw microphone diagnostic state.
+  const [micDiagnosticRunning, setMicDiagnosticRunning] =
+    useState(false);
+
+  const [micDiagnosticStatus, setMicDiagnosticStatus] =
+    useState('');
+
+  const [micInputName, setMicInputName] =
+    useState('');
+
+  const [micMetering, setMicMetering] =
+    useState(null);
 
 
   // ----------------------------------------------------------
   // REFS
   // ----------------------------------------------------------
 
-  const flatListRef = useRef(null);
+  const flatListRef =
+    useRef(null);
 
-  const userIdRef = useRef(null);
+  const userIdRef =
+    useRef(null);
 
-  const mountedRef = useRef(true);
+  const mountedRef =
+    useRef(true);
 
-  const speechTimeoutRef = useRef(null);
+  const speechTimeoutRef =
+    useRef(null);
 
-  const turnEndTimeoutRef = useRef(null);
+  const turnEndTimeoutRef =
+    useRef(null);
 
-  const finalTranscriptRef = useRef('');
+  const finalTranscriptRef =
+    useRef('');
 
-  const speechSegmentBufferRef = useRef('');
+  const speechSegmentBufferRef =
+    useRef('');
 
-  const speechQueueRef = useRef([]);
+  const speechQueueRef =
+    useRef([]);
 
-  const isSpeakingRef = useRef(false);
+  const isSpeakingRef =
+    useRef(false);
 
-  const currentSpeakingIdRef = useRef(null);
+  const currentSpeakingIdRef =
+    useRef(null);
 
-  const sendingRef = useRef(false);
+  const sendingRef =
+    useRef(false);
 
-  const recognitionRetryTimeoutRef = useRef(null);
+  const recognitionRetryTimeoutRef =
+    useRef(null);
 
-  const conversationHistoryRef = useRef([]);
+  const conversationHistoryRef =
+    useRef([]);
 
-  const sessionActiveRef = useRef(false);
+  const sessionActiveRef =
+    useRef(false);
+
 
   // ----------------------------------------------------------
-  // IMPORTANT SPEECH RECOGNITION REFS
+  // SPEECH RECOGNITION REFS
   // ----------------------------------------------------------
 
-  // True only while the native recognition engine is actually
-  // running.
-  const recognitionRunningRef = useRef(false);
+  const recognitionRunningRef =
+    useRef(false);
 
-  // True when WE intentionally stopped/aborted recognition.
-  // This prevents the "aborted -> end -> restart -> abort" loop.
-  const intentionalRecognitionStopRef = useRef(false);
+  const intentionalRecognitionStopRef =
+    useRef(false);
 
-  // Prevent multiple start() calls at the same time.
-  const recognitionStartingRef = useRef(false);
+  const recognitionStartingRef =
+    useRef(false);
 
-  // Current target language / level.
-  const targetLanguageRef = useRef('English');
+  const finalResultHandledRef =
+    useRef(false);
 
-  const levelRef = useRef('Beginner');
+  const targetLanguageRef =
+    useRef('English');
 
-  // Preferred voice selected by the user.
-  const preferredVoiceRef = useRef(null);
+  const levelRef =
+    useRef('Beginner');
+
+  const preferredVoiceRef =
+    useRef(null);
+
+
+  // ----------------------------------------------------------
+  // RAW MICROPHONE DIAGNOSTIC REFS
+  // ----------------------------------------------------------
+
+  const micDiagnosticRunningRef =
+    useRef(false);
+
+  const micLastMeteringLogRef =
+    useRef(0);
+
+  const micDetectedSpeechRef =
+    useRef(false);
+
+  const micInputRef =
+    useRef(null);
+
+
+  // ============================================================
+  // EXPO AUDIO RECORDER
+  //
+  // IMPORTANT:
+  // This recorder is ONLY used for the diagnostic.
+  //
+  // It must NOT run at the same time as
+  // ExpoSpeechRecognitionModule.
+  // ============================================================
+
+  const audioRecorder =
+    useAudioRecorder(
+      {
+        ...RecordingPresets.HIGH_QUALITY,
+
+        // Ask Android for a microphone source optimized
+        // for voice recognition.
+        android: {
+          ...RecordingPresets.HIGH_QUALITY.android,
+          audioSource: 'voice_recognition',
+        },
+
+        // Enable metering so we can see whether actual
+        // microphone level is changing while the user speaks.
+        isMeteringEnabled: true,
+      },
+      (status) => {
+        if (
+          !micDiagnosticRunningRef.current
+        ) {
+          return;
+        }
+
+        const now =
+          Date.now();
+
+        // Avoid flooding Metro with hundreds of logs.
+        if (
+          now -
+            micLastMeteringLogRef.current <
+          250
+        ) {
+          return;
+        }
+
+        micLastMeteringLogRef.current =
+          now;
+
+        const meter =
+          status?.metering;
+
+        if (
+          typeof meter === 'number'
+        ) {
+          if (
+            mountedRef.current
+          ) {
+            setMicMetering(
+              meter
+            );
+          }
+
+          console.log(
+            '🎤 RAW MIC METERING:',
+            meter
+          );
+
+          /*
+           * Android/Expo metering is generally expressed
+           * as an audio level value.
+           *
+           * We don't assume one exact threshold here.
+           * We simply detect whether the value changes
+           * while the user is speaking.
+           */
+          if (
+            Math.abs(meter) >
+            0.1
+          ) {
+            micDetectedSpeechRef.current =
+              true;
+          }
+        } else {
+          console.log(
+            '🎤 RAW MIC STATUS:',
+            status
+          );
+        }
+      }
+    );
 
 
   // ============================================================
@@ -202,41 +368,76 @@ export default function TutorChatScreen({
   // ============================================================
 
   useEffect(() => {
-    mountedRef.current = true;
+    mountedRef.current =
+      true;
 
     fetchUserAndProfile();
     loadDeviceVoices();
 
     return () => {
-      mountedRef.current = false;
+      mountedRef.current =
+        false;
 
-      sessionActiveRef.current = false;
+      sessionActiveRef.current =
+        false;
 
-      if (speechTimeoutRef.current) {
-        clearTimeout(speechTimeoutRef.current);
-        speechTimeoutRef.current = null;
+      micDiagnosticRunningRef.current =
+        false;
+
+      if (
+        speechTimeoutRef.current
+      ) {
+        clearTimeout(
+          speechTimeoutRef.current
+        );
+
+        speechTimeoutRef.current =
+          null;
       }
 
-      if (turnEndTimeoutRef.current) {
-        clearTimeout(turnEndTimeoutRef.current);
-        turnEndTimeoutRef.current = null;
+      if (
+        turnEndTimeoutRef.current
+      ) {
+        clearTimeout(
+          turnEndTimeoutRef.current
+        );
+
+        turnEndTimeoutRef.current =
+          null;
       }
 
-      if (recognitionRetryTimeoutRef.current) {
-        clearTimeout(recognitionRetryTimeoutRef.current);
-        recognitionRetryTimeoutRef.current = null;
+      if (
+        recognitionRetryTimeoutRef.current
+      ) {
+        clearTimeout(
+          recognitionRetryTimeoutRef.current
+        );
+
+        recognitionRetryTimeoutRef.current =
+          null;
       }
 
       stopRecognition(true);
       stopAllSpeech();
+
+      try {
+        if (
+          audioRecorder?.isRecording
+        ) {
+          audioRecorder.stop();
+        }
+      } catch (_) {}
     };
   }, []);
 
 
-  // Keep ref synchronized with state.
+  // Keep session ref synchronized.
   useEffect(() => {
-    sessionActiveRef.current = isSessionActive;
-  }, [isSessionActive]);
+    sessionActiveRef.current =
+      isSessionActive;
+  }, [
+    isSessionActive,
+  ]);
 
 
   // ============================================================
@@ -244,7 +445,9 @@ export default function TutorChatScreen({
   // ============================================================
 
   useEffect(() => {
-    if (messages.length > 0) {
+    if (
+      messages.length > 0
+    ) {
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({
           animated: true,
@@ -258,532 +461,1152 @@ export default function TutorChatScreen({
   // USER PROFILE
   // ============================================================
 
-  const fetchUserAndProfile = async () => {
-    try {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
+  const fetchUserAndProfile =
+    async () => {
+      try {
+        const {
+          data: {
+            user,
+          },
+          error,
+        } =
+          await supabase.auth.getUser();
 
-      if (error || !user) {
-        console.log(
-          'No active Supabase auth session. Using local tutor profile.'
-        );
+        if (
+          error ||
+          !user
+        ) {
+          console.log(
+            'No active Supabase auth session. Using local tutor profile.'
+          );
 
-        const localProfile = {
-          target_language: 'English',
-          proficiency_level: 'Beginner',
-          learning_goal: null,
-          field_of_interest: null,
-          preferred_voice: null,
-          current_scenario: 'introduction',
+          const localProfile = {
+            target_language:
+              'English',
+
+            proficiency_level:
+              'Beginner',
+
+            learning_goal:
+              null,
+
+            field_of_interest:
+              null,
+
+            preferred_voice:
+              null,
+
+            current_scenario:
+              'introduction',
+
+            scenario_objective:
+              'Introduce yourself and have a basic conversation.',
+
+            full_name:
+              'User',
+
+            avatar_type:
+              '🎓',
+          };
+
+          const language =
+            localProfile.target_language ||
+            'English';
+
+          const level =
+            localProfile.proficiency_level ||
+            'Beginner';
+
+          targetLanguageRef.current =
+            language;
+
+          levelRef.current =
+            level;
+
+          preferredVoiceRef.current =
+            localProfile.preferred_voice ||
+            null;
+
+          setSpeechLang(
+            getLanguageCode(
+              language
+            )
+          );
+
+          setSelectedScenario(
+            localProfile.current_scenario ||
+              'introduction'
+          );
+
+          initializeDayCurriculumChat(
+            currentDayNum,
+            language
+          );
+
+          return;
+        }
+
+        userIdRef.current =
+          user.id;
+
+        let profile =
+          null;
+
+        try {
+          const {
+            data,
+          } =
+            await supabase
+              .from(
+                'user_profiles'
+              )
+              .select('*')
+              .eq(
+                'id',
+                user.id
+              )
+              .maybeSingle();
+
+          profile =
+            data;
+
+        } catch (
+          profileError
+        ) {
+          console.log(
+            'Profile fetch error:',
+            profileError?.message ||
+              profileError
+          );
+        }
+
+        const mergedProfile = {
+          target_language:
+            profile?.target_language ||
+            'English',
+
+          proficiency_level:
+            profile?.proficiency_level ||
+            'Beginner',
+
+          learning_goal:
+            profile?.learning_goal ||
+            null,
+
+          field_of_interest:
+            profile?.field_of_interest ||
+            null,
+
+          preferred_voice:
+            profile?.preferred_voice ||
+            null,
+
+          current_scenario:
+            profile?.current_scenario ||
+            'introduction',
+
           scenario_objective:
+            profile?.scenario_objective ||
             'Introduce yourself and have a basic conversation.',
-          full_name: 'User',
-          avatar_type: '🎓',
+
+          full_name:
+            profile?.full_name ||
+            'User',
+
+          avatar_type:
+            profile?.avatar_type ||
+            '🎓',
         };
 
-        const language =
-          localProfile.target_language || 'English';
+        targetLanguageRef.current =
+          mergedProfile.target_language;
 
-        const level =
-          localProfile.proficiency_level || 'Beginner';
-
-        targetLanguageRef.current = language;
-        levelRef.current = level;
+        levelRef.current =
+          mergedProfile.proficiency_level;
 
         preferredVoiceRef.current =
-          localProfile.preferred_voice || null;
+          mergedProfile.preferred_voice ||
+          null;
 
-        setSpeechLang(getLanguageCode(language));
+        setSpeechLang(
+          getLanguageCode(
+            mergedProfile.target_language
+          )
+        );
 
         setSelectedScenario(
-          localProfile.current_scenario || 'introduction'
+          mergedProfile.current_scenario ||
+            'introduction'
         );
 
         initializeDayCurriculumChat(
           currentDayNum,
-          language
-        );
-
-        return;
-      }
-
-      userIdRef.current = user.id;
-
-      let profile = null;
-
-      try {
-        const { data } = await supabase
-          .from('user_profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        profile = data;
-      } catch (profileError) {
-        console.log(
-          'Profile fetch error:',
-          profileError?.message || profileError
-        );
-      }
-
-      const mergedProfile = {
-        target_language:
-          profile?.target_language || 'English',
-
-        proficiency_level:
-          profile?.proficiency_level || 'Beginner',
-
-        learning_goal:
-          profile?.learning_goal || null,
-
-        field_of_interest:
-          profile?.field_of_interest || null,
-
-        preferred_voice:
-          profile?.preferred_voice || null,
-
-        current_scenario:
-          profile?.current_scenario || 'introduction',
-
-        scenario_objective:
-          profile?.scenario_objective ||
-          'Introduce yourself and have a basic conversation.',
-
-        full_name:
-          profile?.full_name || 'User',
-
-        avatar_type:
-          profile?.avatar_type || '🎓',
-      };
-
-      targetLanguageRef.current =
-        mergedProfile.target_language;
-
-      levelRef.current =
-        mergedProfile.proficiency_level;
-
-      preferredVoiceRef.current =
-        mergedProfile.preferred_voice || null;
-
-      setSpeechLang(
-        getLanguageCode(
           mergedProfile.target_language
-        )
-      );
+        );
 
-      setSelectedScenario(
-        mergedProfile.current_scenario || 'introduction'
-      );
+      } catch (
+        error
+      ) {
+        console.log(
+          'fetchUserAndProfile error:',
+          error?.message ||
+            error
+        );
 
-      initializeDayCurriculumChat(
-        currentDayNum,
-        mergedProfile.target_language
-      );
+        targetLanguageRef.current =
+          'English';
 
-    } catch (error) {
-      console.log(
-        'fetchUserAndProfile error:',
-        error?.message || error
-      );
+        levelRef.current =
+          'Beginner';
 
-      targetLanguageRef.current = 'English';
-      levelRef.current = 'Beginner';
+        setSpeechLang(
+          'en-IN'
+        );
 
-      setSpeechLang('en-IN');
-
-      initializeDayCurriculumChat(
-        currentDayNum,
-        'English'
-      );
-    }
-  };
+        initializeDayCurriculumChat(
+          currentDayNum,
+          'English'
+        );
+      }
+    };
 
 
   // ============================================================
   // INITIAL DAY MESSAGE
   // ============================================================
 
-  const initializeDayCurriculumChat = (
-    dayNumber,
-    language
-  ) => {
-    conversationHistoryRef.current = [];
+  const initializeDayCurriculumChat =
+    (
+      dayNumber,
+      language
+    ) => {
+      conversationHistoryRef.current =
+        [];
 
-    const welcomeText =
-      `Welcome to Day ${dayNumber}! Today we will practice ` +
-      `${language} together. Please introduce yourself in ${language}.`;
+      const welcomeText =
+        `Welcome to Day ${dayNumber}! Today we will practice ${language} together. Please introduce yourself in ${language}.`;
 
-    const welcomeMessage = {
-      id: `welcome-${dayNumber}-${Date.now()}`,
+      const welcomeMessage = {
+        id:
+          `welcome-${dayNumber}-${Date.now()}`,
 
-      role: 'assistant',
+        role:
+          'assistant',
 
-      type: 'tutor',
+        type:
+          'tutor',
 
-      text:
-        `Welcome to Day ${dayNumber}! 🎓\n\n` +
-        `Today we will practice ${language} together.\n\n` +
-        `I will help you with grammar, vocabulary, pronunciation, ` +
-        `and natural conversation.\n\n` +
-        `Let's begin! Please introduce yourself in ${language}.`,
+        text:
+          `Welcome to Day ${dayNumber}! 🎓\n\n` +
+          `Today we will practice ${language} together.\n\n` +
+          `I will help you with grammar, vocabulary, pronunciation, and natural conversation.\n\n` +
+          `Let's begin! Please introduce yourself in ${language}.`,
 
-      data: {
-        reply: welcomeText,
-      },
+        data: {
+          reply:
+            welcomeText,
+        },
+      };
+
+      setMessages([
+        welcomeMessage,
+      ]);
+
+      conversationHistoryRef.current =
+        [
+          {
+            role:
+              'assistant',
+
+            content:
+              welcomeText,
+          },
+        ];
+
+      scheduleSpeech(
+        welcomeMessage,
+        700
+      );
     };
-
-    setMessages([welcomeMessage]);
-
-    conversationHistoryRef.current = [
-      {
-        role: 'assistant',
-        content: welcomeText,
-      },
-    ];
-
-    scheduleSpeech(welcomeMessage, 700);
-  };
 
 
   // ============================================================
   // DEVICE VOICES
   // ============================================================
 
-  const loadDeviceVoices = async () => {
-    try {
-      const voices =
-        await Speech.getAvailableVoicesAsync();
+  const loadDeviceVoices =
+    async () => {
+      try {
+        const voices =
+          await Speech.getAvailableVoicesAsync();
 
-      if (mountedRef.current) {
-        setAvailableVoices(
-          Array.isArray(voices)
-            ? voices
-            : []
+        if (
+          mountedRef.current
+        ) {
+          setAvailableVoices(
+            Array.isArray(
+              voices
+            )
+              ? voices
+              : []
+          );
+        }
+
+        console.log(
+          'Available device voices:',
+          Array.isArray(
+            voices
+          )
+            ? voices.length
+            : 0
+        );
+
+      } catch (
+        error
+      ) {
+        console.log(
+          'Unable to load voices:',
+          error?.message ||
+            error
         );
       }
-
-      console.log(
-        'Available device voices:',
-        Array.isArray(voices)
-          ? voices.length
-          : 0
-      );
-    } catch (error) {
-      console.log(
-        'Unable to load voices:',
-        error?.message || error
-      );
-    }
-  };
+    };
 
 
   // ============================================================
   // SAVE PREFERRED VOICE
   // ============================================================
 
-  const updatePreferredVoice = async (voice) => {
-    if (!voice) return;
-
-    preferredVoiceRef.current =
-      voice.identifier ||
-      voice.name ||
-      null;
-
-    try {
-      if (userIdRef.current) {
-        await supabase
-          .from('user_profiles')
-          .update({
-            preferred_voice:
-              voice.identifier ||
-              voice.name,
-          })
-          .eq(
-            'id',
-            userIdRef.current
-          );
+  const updatePreferredVoice =
+    async (
+      voice
+    ) => {
+      if (!voice) {
+        return;
       }
-    } catch (error) {
-      console.log(
-        'Unable to save preferred voice:',
-        error?.message || error
-      );
-    }
-  };
+
+      preferredVoiceRef.current =
+        voice.identifier ||
+        voice.name ||
+        null;
+
+      try {
+        if (
+          userIdRef.current
+        ) {
+          await supabase
+            .from(
+              'user_profiles'
+            )
+            .update({
+              preferred_voice:
+                voice.identifier ||
+                voice.name,
+            })
+            .eq(
+              'id',
+              userIdRef.current
+            );
+        }
+
+      } catch (
+        error
+      ) {
+        console.log(
+          'Unable to save preferred voice:',
+          error?.message ||
+            error
+        );
+      }
+    };
 
 
   // ============================================================
   // STOP SPEECH
   // ============================================================
 
-  const stopAllSpeech = async () => {
-    try {
-      if (speechTimeoutRef.current) {
-        clearTimeout(
+  const stopAllSpeech =
+    async () => {
+      try {
+        if (
           speechTimeoutRef.current
-        );
+        ) {
+          clearTimeout(
+            speechTimeoutRef.current
+          );
 
-        speechTimeoutRef.current = null;
-      }
+          speechTimeoutRef.current =
+            null;
+        }
 
-      speechQueueRef.current = [];
+        speechQueueRef.current =
+          [];
 
-      await Speech.stop();
+        await Speech.stop();
 
-    } catch (error) {
-      console.log(
-        'Speech stop error:',
-        error?.message || error
-      );
-    }
-
-    isSpeakingRef.current = false;
-    currentSpeakingIdRef.current = null;
-
-    if (mountedRef.current) {
-      setSpeakingId(null);
-      setIsPlaying(false);
-    }
-  };
-
-
-  // ============================================================
-  // START CONTINUOUS LISTENING
-  // ============================================================
-
-  const startContinuousListening =
-    useCallback(async () => {
-      if (!mountedRef.current) {
-        return;
-      }
-
-      if (!sessionActiveRef.current) {
-        return;
-      }
-
-      if (sendingRef.current) {
-        return;
-      }
-
-      if (isSpeakingRef.current) {
-        return;
-      }
-
-      // Already running.
-      // IMPORTANT: Do not abort it and start another one.
-      if (recognitionRunningRef.current) {
+      } catch (
+        error
+      ) {
         console.log(
-          '🎙️ Recognition already running.'
+          'Speech stop error:',
+          error?.message ||
+            error
+        );
+      }
+
+      isSpeakingRef.current =
+        false;
+
+      currentSpeakingIdRef.current =
+        null;
+
+      if (
+        mountedRef.current
+      ) {
+        setSpeakingId(
+          null
+        );
+
+        setIsPlaying(
+          false
+        );
+      }
+    };
+
+
+  // ============================================================
+  // RAW MICROPHONE DIAGNOSTIC
+  //
+  // THIS IS THE IMPORTANT NEW TEST.
+  //
+  // Do NOT run speech recognition while this test is running.
+  // ============================================================
+
+  const runMicrophoneDiagnostic =
+    async () => {
+      if (
+        !mountedRef.current
+      ) {
+        return;
+      }
+
+      if (
+        micDiagnosticRunningRef.current
+      ) {
+        console.log(
+          '🎤 Microphone diagnostic already running.'
         );
 
         return;
       }
 
-      // Another start operation is already in progress.
-      if (recognitionStartingRef.current) {
+      if (
+        loading ||
+        sendingRef.current
+      ) {
+        setMicDiagnosticStatus(
+          'AI request is currently processing.'
+        );
+
         return;
       }
 
-      recognitionStartingRef.current = true;
+      console.log(
+        '========================================'
+      );
+
+      console.log(
+        '🎤 RAW MICROPHONE DIAGNOSTIC START'
+      );
+
+      console.log(
+        '========================================'
+      );
+
+      micDiagnosticRunningRef.current =
+        true;
+
+      micDetectedSpeechRef.current =
+        false;
+
+      micLastMeteringLogRef.current =
+        0;
+
+      if (
+        mountedRef.current
+      ) {
+        setMicDiagnosticRunning(
+          true
+        );
+
+        setMicDiagnosticStatus(
+          'Preparing microphone...'
+        );
+
+        setMicInputName(
+          ''
+        );
+
+        setMicMetering(
+          null
+        );
+      }
 
       try {
-        setVoiceError('');
-
-        const permission =
-          await ExpoSpeechRecognitionModule
-            .requestPermissionsAsync();
-
-        console.log(
-          'Speech permission:',
-          permission
-        );
-
-        if (!permission?.granted) {
-          recognitionStartingRef.current = false;
-
-          if (mountedRef.current) {
-            setVoiceError(
-              'Microphone permission is required.'
-            );
-          }
-
-          return;
-        }
+        // ------------------------------------------------------
+        // Stop speech recognition first.
+        // ------------------------------------------------------
 
         if (
-          !mountedRef.current ||
-          !sessionActiveRef.current ||
-          sendingRef.current ||
-          isSpeakingRef.current
+          recognitionRunningRef.current ||
+          recognitionStartingRef.current
         ) {
-          recognitionStartingRef.current = false;
-          return;
-        }
+          await stopRecognition(
+            true
+          );
 
-        // ------------------------------------------------------
-        // IMPORTANT
-        // ------------------------------------------------------
-        // We DO NOT call abort() here.
-        //
-        // The previous code called abort() every time before
-        // start(), which produced:
-        //
-        // aborted -> end -> restart -> abort -> end...
-        //
-        // That was the main bug.
-        // ------------------------------------------------------
-
-        intentionalRecognitionStopRef.current = false;
-
-        console.log(
-          '🎙️ Starting speech recognition with:',
-          speechLang
-        );
-
-        await ExpoSpeechRecognitionModule.start({
-          lang: speechLang,
-
-          interimResults: true,
-
-          continuous: true,
-
-          maxAlternatives: 1,
-
-          requiresOnDeviceRecognition: false,
-
-          addsPunctuation: true,
-        });
-
-        recognitionRunningRef.current = true;
-
-      } catch (error) {
-        console.log(
-          '🎙️ Speech start error:',
-          error?.message || error
-        );
-
-        recognitionRunningRef.current = false;
-
-        if (mountedRef.current) {
-          setListening(false);
-
-          setVoiceError(
-            error?.message ||
-            'Unable to start speech recognition.'
+          await new Promise(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                300
+              )
           );
         }
 
-        // Retry only when appropriate.
+        // ------------------------------------------------------
+        // Stop TTS.
+        // ------------------------------------------------------
+
+        await stopAllSpeech();
+
+        // ------------------------------------------------------
+        // Microphone permission.
+        // ------------------------------------------------------
+
+        const permission =
+          await AudioModule.requestRecordingPermissionsAsync();
+
+        console.log(
+          '🎤 RAW MIC PERMISSION:',
+          permission
+        );
+
         if (
-          mountedRef.current &&
-          sessionActiveRef.current &&
-          !sendingRef.current &&
-          !isSpeakingRef.current &&
-          !intentionalRecognitionStopRef.current
+          !permission?.granted
         ) {
+          throw new Error(
+            'Microphone permission was not granted.'
+          );
+        }
+
+        // ------------------------------------------------------
+        // Configure audio for recording.
+        // ------------------------------------------------------
+
+        await setAudioModeAsync({
+          playsInSilentMode:
+            true,
+
+          allowsRecording:
+            true,
+        });
+
+        console.log(
+          '🎤 Audio mode configured.'
+        );
+
+        // ------------------------------------------------------
+        // Prepare recorder.
+        // ------------------------------------------------------
+
+        await audioRecorder.prepareToRecordAsync({
+          ...RecordingPresets.HIGH_QUALITY,
+
+          android: {
+            ...RecordingPresets.HIGH_QUALITY.android,
+
+            audioSource:
+              'voice_recognition',
+          },
+
+          isMeteringEnabled:
+            true,
+        });
+
+        console.log(
+          '🎤 Recorder prepared.'
+        );
+
+        // ------------------------------------------------------
+        // Inspect available inputs.
+        // ------------------------------------------------------
+
+        try {
+          const inputs =
+            await audioRecorder.getAvailableInputs();
+
+          console.log(
+            '🎤 AVAILABLE RECORDING INPUTS:',
+            inputs
+          );
+
           if (
-            recognitionRetryTimeoutRef.current
+            Array.isArray(
+              inputs
+            ) &&
+            inputs.length > 0
           ) {
-            clearTimeout(
-              recognitionRetryTimeoutRef.current
+            inputs.forEach(
+              (
+                item,
+                index
+              ) => {
+                console.log(
+                  `🎤 INPUT ${index}:`,
+                  {
+                    name:
+                      item?.name,
+                    type:
+                      item?.type,
+                    uid:
+                      item?.uid,
+                  }
+                );
+              }
             );
           }
 
-          recognitionRetryTimeoutRef.current =
-            setTimeout(() => {
-              recognitionRetryTimeoutRef.current = null;
+        } catch (
+          inputError
+        ) {
+          console.log(
+            '🎤 Could not read available recording inputs:',
+            inputError?.message ||
+              inputError
+          );
+        }
 
-              if (
-                mountedRef.current &&
-                sessionActiveRef.current &&
-                !sendingRef.current &&
-                !isSpeakingRef.current &&
-                !recognitionRunningRef.current
-              ) {
-                startContinuousListening();
-              }
-            }, 1500);
+        // ------------------------------------------------------
+        // Inspect current input.
+        // ------------------------------------------------------
+
+        try {
+          const currentInput =
+            await audioRecorder.getCurrentInput();
+
+          console.log(
+            '🎤 CURRENT RECORDING INPUT:',
+            currentInput
+          );
+
+          micInputRef.current =
+            currentInput;
+
+          const readableInput =
+            currentInput?.name ||
+            currentInput?.type ||
+            currentInput?.uid ||
+            'Unknown microphone';
+
+          if (
+            mountedRef.current
+          ) {
+            setMicInputName(
+              readableInput
+            );
+          }
+
+        } catch (
+          currentInputError
+        ) {
+          console.log(
+            '🎤 Could not read current recording input:',
+            currentInputError?.message ||
+              currentInputError
+          );
+        }
+
+        if (
+          mountedRef.current
+        ) {
+          setMicDiagnosticStatus(
+            'Recording for 5 seconds — SPEAK NOW.'
+          );
+        }
+
+        console.log(
+          '🎤 ========================================'
+        );
+
+        console.log(
+          '🎤 RECORDING STARTED'
+        );
+
+        console.log(
+          '🎤 SPEAK NOW FOR 5 SECONDS'
+        );
+
+        console.log(
+          '🎤 ========================================'
+        );
+
+        // ------------------------------------------------------
+        // Start a controlled 5-second recording.
+        // ------------------------------------------------------
+
+        audioRecorder.record({
+          forDuration:
+            5,
+        });
+
+        // Give Android time to capture the full recording.
+        await new Promise(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              5600
+            )
+        );
+
+        // ------------------------------------------------------
+        // Explicitly stop if still recording.
+        // ------------------------------------------------------
+
+        try {
+          if (
+            audioRecorder.isRecording
+          ) {
+            await audioRecorder.stop();
+          }
+        } catch (
+          stopError
+        ) {
+          console.log(
+            '🎤 Recorder stop warning:',
+            stopError?.message ||
+              stopError
+          );
+        }
+
+        // ------------------------------------------------------
+        // Get final status.
+        // ------------------------------------------------------
+
+        let finalStatus =
+          null;
+
+        try {
+          finalStatus =
+            audioRecorder.getStatus();
+
+          console.log(
+            '🎤 FINAL RAW MIC STATUS:',
+            finalStatus
+          );
+        } catch (
+          statusError
+        ) {
+          console.log(
+            '🎤 Could not get final recorder status:',
+            statusError?.message ||
+              statusError
+          );
+        }
+
+        const recordingUri =
+          audioRecorder.uri ||
+          finalStatus?.url ||
+          null;
+
+        console.log(
+          '🎤 FINAL RECORDING URI:',
+          recordingUri
+        );
+
+        console.log(
+          '🎤 AUDIO ACTIVITY DETECTED:',
+          micDetectedSpeechRef.current
+        );
+
+        // ------------------------------------------------------
+        // Diagnostic conclusion.
+        // ------------------------------------------------------
+
+        if (
+          micDetectedSpeechRef.current
+        ) {
+          console.log(
+            '🎤 RESULT: MICROPHONE AUDIO ACTIVITY DETECTED.'
+          );
+
+          if (
+            mountedRef.current
+          ) {
+            setMicDiagnosticStatus(
+              '✅ Microphone audio detected. Check SpeechRecognizer/Android speech service next.'
+            );
+          }
+
+        } else if (
+          recordingUri
+        ) {
+          console.log(
+            '🎤 RESULT: RECORDING FILE CREATED, BUT NO CLEAR METERING ACTIVITY WAS DETECTED.'
+          );
+
+          if (
+            mountedRef.current
+          ) {
+            setMicDiagnosticStatus(
+              '⚠️ Recording created, but no clear microphone activity was detected.'
+            );
+          }
+
+        } else {
+          console.log(
+            '🎤 RESULT: NO RECORDING URI / NO MICROPHONE DATA.'
+          );
+
+          if (
+            mountedRef.current
+          ) {
+            setMicDiagnosticStatus(
+              '❌ No microphone recording data was produced.'
+            );
+          }
+        }
+
+        console.log(
+          '🎤 ========================================'
+        );
+
+        console.log(
+          '🎤 RAW MICROPHONE DIAGNOSTIC COMPLETE'
+        );
+
+        console.log(
+          '🎤 ========================================'
+        );
+
+      } catch (
+        error
+      ) {
+        console.log(
+          '🎤 RAW MICROPHONE DIAGNOSTIC ERROR:',
+          error?.message ||
+            error
+        );
+
+        console.log(
+          '🎤 RAW MICROPHONE DIAGNOSTIC ERROR OBJECT:',
+          error
+        );
+
+        if (
+          mountedRef.current
+        ) {
+          setMicDiagnosticStatus(
+            `❌ Microphone diagnostic failed: ${
+              error?.message ||
+              'Unknown error'
+            }`
+          );
         }
 
       } finally {
-        recognitionStartingRef.current = false;
-      }
+        micDiagnosticRunningRef.current =
+          false;
 
-    }, [speechLang]);
+        if (
+          mountedRef.current
+        ) {
+          setMicDiagnosticRunning(
+            false
+          );
+        }
+      }
+    };
+
+
+  // ============================================================
+  // START SPEECH RECOGNITION
+  // ============================================================
+
+  const startContinuousListening =
+    useCallback(
+      async () => {
+        if (
+          !mountedRef.current
+        ) {
+          return;
+        }
+
+        if (
+          !sessionActiveRef.current
+        ) {
+          return;
+        }
+
+        if (
+          sendingRef.current
+        ) {
+          return;
+        }
+
+        if (
+          isSpeakingRef.current
+        ) {
+          return;
+        }
+
+        if (
+          micDiagnosticRunningRef.current
+        ) {
+          console.log(
+            '🎙️ Microphone diagnostic is running. Speech recognition will not start.'
+          );
+
+          return;
+        }
+
+        if (
+          recognitionRunningRef.current
+        ) {
+          console.log(
+            '🎙️ Recognition already running.'
+          );
+
+          return;
+        }
+
+        if (
+          recognitionStartingRef.current
+        ) {
+          return;
+        }
+
+        recognitionStartingRef.current =
+          true;
+
+        try {
+          setVoiceError(
+            ''
+          );
+
+          finalResultHandledRef.current =
+            false;
+
+          speechSegmentBufferRef.current =
+            '';
+
+          finalTranscriptRef.current =
+            '';
+
+          const permission =
+            await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+
+          console.log(
+            'Speech permission:',
+            permission
+          );
+
+          if (
+            !permission?.granted
+          ) {
+            recognitionStartingRef.current =
+              false;
+
+            if (
+              mountedRef.current
+            ) {
+              setListening(
+                false
+              );
+
+              setVoiceError(
+                'Microphone permission is required.'
+              );
+            }
+
+            return;
+          }
+
+          if (
+            !mountedRef.current ||
+            !sessionActiveRef.current ||
+            sendingRef.current ||
+            isSpeakingRef.current ||
+            micDiagnosticRunningRef.current
+          ) {
+            recognitionStartingRef.current =
+              false;
+
+            return;
+          }
+
+          intentionalRecognitionStopRef.current =
+            false;
+
+          console.log(
+            '🎙️ Starting speech recognition with:',
+            speechLang
+          );
+
+          await ExpoSpeechRecognitionModule.start({
+            lang:
+              speechLang,
+
+            interimResults:
+              true,
+
+            continuous:
+              false,
+
+            maxAlternatives:
+              1,
+
+            requiresOnDeviceRecognition:
+              false,
+          });
+
+          recognitionRunningRef.current =
+            true;
+
+          console.log(
+            '🎙️ Speech recognition start() completed'
+          );
+
+        } catch (
+          error
+        ) {
+          console.log(
+            '🎙️ Speech start error:',
+            error?.message ||
+              error
+          );
+
+          recognitionRunningRef.current =
+            false;
+
+          if (
+            mountedRef.current
+          ) {
+            setListening(
+              false
+            );
+
+            setVoiceError(
+              error?.message ||
+                'Unable to start speech recognition.'
+            );
+          }
+
+        } finally {
+          recognitionStartingRef.current =
+            false;
+        }
+      },
+      [
+        speechLang,
+      ]
+    );
 
 
   // ============================================================
   // STOP RECOGNITION
   // ============================================================
 
-  const stopRecognition = async (
-    immediate = true
-  ) => {
-    // Mark this stop as intentional BEFORE calling native
-    // abort/stop. The native module can emit "aborted" and
-    // "end" immediately afterwards.
-    intentionalRecognitionStopRef.current = true;
-
-    if (
-      recognitionRetryTimeoutRef.current
-    ) {
-      clearTimeout(
-        recognitionRetryTimeoutRef.current
-      );
-
-      recognitionRetryTimeoutRef.current = null;
-    }
-
-    if (
-      turnEndTimeoutRef.current
-    ) {
-      clearTimeout(
-        turnEndTimeoutRef.current
-      );
-
-      turnEndTimeoutRef.current = null;
-    }
-
-    // If recognition is not actually running, there is
-    // nothing to abort.
-    if (!recognitionRunningRef.current) {
-      if (mountedRef.current) {
-        setListening(false);
-      }
-
-      return;
-    }
-
-    try {
-      recognitionRunningRef.current = false;
+  const stopRecognition =
+    async (
+      immediate = true
+    ) => {
+      intentionalRecognitionStopRef.current =
+        true;
 
       if (
-        ExpoSpeechRecognitionModule
+        recognitionRetryTimeoutRef.current
       ) {
-        if (immediate) {
-          await ExpoSpeechRecognitionModule.abort();
-        } else {
-          await ExpoSpeechRecognitionModule.stop();
-        }
+        clearTimeout(
+          recognitionRetryTimeoutRef.current
+        );
+
+        recognitionRetryTimeoutRef.current =
+          null;
       }
 
-    } catch (error) {
-      console.log(
-        'Stop recognition error:',
-        error?.message || error
-      );
-    }
+      if (
+        turnEndTimeoutRef.current
+      ) {
+        clearTimeout(
+          turnEndTimeoutRef.current
+        );
 
-    if (mountedRef.current) {
-      setListening(false);
-    }
-  };
+        turnEndTimeoutRef.current =
+          null;
+      }
+
+      if (
+        !recognitionRunningRef.current
+      ) {
+        if (
+          mountedRef.current
+        ) {
+          setListening(
+            false
+          );
+        }
+
+        return;
+      }
+
+      try {
+        recognitionRunningRef.current =
+          false;
+
+        if (
+          ExpoSpeechRecognitionModule
+        ) {
+          if (
+            immediate
+          ) {
+            console.log(
+              '🎙️ Aborting speech recognition intentionally'
+            );
+
+            await ExpoSpeechRecognitionModule.abort();
+
+          } else {
+            console.log(
+              '🎙️ Stopping speech recognition intentionally'
+            );
+
+            await ExpoSpeechRecognitionModule.stop();
+          }
+        }
+
+      } catch (
+        error
+      ) {
+        console.log(
+          'Stop recognition error:',
+          error?.message ||
+            error
+        );
+      }
+
+      if (
+        mountedRef.current
+      ) {
+        setListening(
+          false
+        );
+      }
+    };
 
 
   // ============================================================
-  // SPEECH RECOGNITION START EVENT
+  // SPEECH START EVENT
   // ============================================================
 
   useSpeechRecognitionEvent(
@@ -793,20 +1616,86 @@ export default function TutorChatScreen({
         '🎙️ Speech recognition started'
       );
 
-      recognitionRunningRef.current = true;
+      recognitionRunningRef.current =
+        true;
 
-      intentionalRecognitionStopRef.current = false;
+      if (
+        mountedRef.current
+      ) {
+        setListening(
+          true
+        );
 
-      if (mountedRef.current) {
-        setListening(true);
-        setVoiceError('');
+        setVoiceError(
+          ''
+        );
       }
     }
   );
 
 
   // ============================================================
-  // SPEECH RECOGNITION END EVENT
+  // AUDIO START
+  // ============================================================
+
+  useSpeechRecognitionEvent(
+    'audiostart',
+    (event) => {
+      console.log(
+        '🎙️ AUDIO START:',
+        event || ''
+      );
+    }
+  );
+
+
+  // ============================================================
+  // SPEECH START
+  // ============================================================
+
+  useSpeechRecognitionEvent(
+    'speechstart',
+    (event) => {
+      console.log(
+        '🎙️ SPEECH START — Android detected speech:',
+        event || ''
+      );
+    }
+  );
+
+
+  // ============================================================
+  // SPEECH END
+  // ============================================================
+
+  useSpeechRecognitionEvent(
+    'speechend',
+    (event) => {
+      console.log(
+        '🎙️ SPEECH END — Android stopped detecting speech:',
+        event || ''
+      );
+    }
+  );
+
+
+  // ============================================================
+  // AUDIO END
+  // ============================================================
+
+  useSpeechRecognitionEvent(
+    'audioend',
+    (event) => {
+      console.log(
+        '🎙️ AUDIO END:',
+        event || ''
+      );
+    }
+  );
+
+
+  // ============================================================
+  // SPEECH RECOGNITION END
   // ============================================================
 
   useSpeechRecognitionEvent(
@@ -816,15 +1705,16 @@ export default function TutorChatScreen({
         '🎙️ Speech recognition ended'
       );
 
-      recognitionRunningRef.current = false;
+      recognitionRunningRef.current =
+        false;
 
-      if (mountedRef.current) {
-        setListening(false);
+      if (
+        mountedRef.current
+      ) {
+        setListening(
+          false
+        );
       }
-
-      // --------------------------------------------------------
-      // INTENTIONAL STOP
-      // --------------------------------------------------------
 
       if (
         intentionalRecognitionStopRef.current
@@ -836,49 +1726,48 @@ export default function TutorChatScreen({
         return;
       }
 
-      // --------------------------------------------------------
-      // DO NOT RESTART WHILE AI IS PROCESSING/SPEAKING
-      // --------------------------------------------------------
-
       if (
         !mountedRef.current ||
-        !sessionActiveRef.current ||
-        sendingRef.current ||
-        isSpeakingRef.current
+        !sessionActiveRef.current
       ) {
+        console.log(
+          '🎙️ Recognition ended because tutor session is inactive.'
+        );
+
         return;
       }
 
-      // --------------------------------------------------------
-      // UNEXPECTED END
-      // --------------------------------------------------------
-
       if (
-        recognitionRetryTimeoutRef.current
+        sendingRef.current
       ) {
-        clearTimeout(
-          recognitionRetryTimeoutRef.current
+        console.log(
+          '🎙️ Recognition ended while AI request is processing.'
         );
+
+        return;
       }
 
-      recognitionRetryTimeoutRef.current =
-        setTimeout(() => {
-          recognitionRetryTimeoutRef.current = null;
+      if (
+        isSpeakingRef.current
+      ) {
+        console.log(
+          '🎙️ Recognition ended while tutor is speaking.'
+        );
 
-          if (
-            mountedRef.current &&
-            sessionActiveRef.current &&
-            !sendingRef.current &&
-            !isSpeakingRef.current &&
-            !recognitionRunningRef.current
-          ) {
-            console.log(
-              '🎙️ Recognition ended unexpectedly. Restarting...'
-            );
+        return;
+      }
 
-            startContinuousListening();
-          }
-        }, 500);
+      console.log(
+        '🎙️ Recognition ended without intentional stop. Waiting for user to start another turn.'
+      );
+
+      if (
+        mountedRef.current
+      ) {
+        setVoiceError(
+          'No speech detected. Tap the microphone to try again.'
+        );
+      }
     }
   );
 
@@ -889,22 +1778,31 @@ export default function TutorChatScreen({
 
   useSpeechRecognitionEvent(
     'result',
-    (event) => {
+    async (
+      event
+    ) => {
       try {
-        if (!event?.results) {
+        if (
+          !event?.results
+        ) {
           return;
         }
 
-        const results = event.results;
+        const results =
+          event.results;
 
         const latestResult =
-          results[results.length - 1];
+          results[
+            results.length - 1
+          ];
 
         const transcript =
           latestResult?.transcript ||
           '';
 
-        if (!transcript.trim()) {
+        if (
+          !transcript.trim()
+        ) {
           return;
         }
 
@@ -915,32 +1813,105 @@ export default function TutorChatScreen({
           event.isFinal
         );
 
-        if (mountedRef.current) {
+        if (
+          mountedRef.current
+        ) {
           setInterimTranscript(
             transcript
           );
 
-          setInput(transcript);
+          setInput(
+            transcript
+          );
         }
 
-        if (event.isFinal) {
-          speechSegmentBufferRef.current =
-            `${speechSegmentBufferRef.current} ${transcript}`
-              .trim();
-
-          finalTranscriptRef.current =
-            speechSegmentBufferRef.current;
-
-          setInterimTranscript('');
-
-          scheduleVoiceTurn();
+        if (
+          !event.isFinal
+        ) {
+          return;
         }
 
-      } catch (error) {
+        if (
+          finalResultHandledRef.current
+        ) {
+          console.log(
+            '🎙️ Duplicate final result ignored.'
+          );
+
+          return;
+        }
+
+        finalResultHandledRef.current =
+          true;
+
+        const finalText =
+          transcript.trim();
+
+        if (
+          !finalText
+        ) {
+          finalResultHandledRef.current =
+            false;
+
+          return;
+        }
+
+        speechSegmentBufferRef.current =
+          finalText;
+
+        finalTranscriptRef.current =
+          finalText;
+
+        if (
+          mountedRef.current
+        ) {
+          setInterimTranscript(
+            ''
+          );
+        }
+
+        console.log(
+          '🎙️ FINAL USER SPEECH:',
+          finalText
+        );
+
+        await stopRecognition(
+          true
+        );
+
+        speechSegmentBufferRef.current =
+          '';
+
+        finalTranscriptRef.current =
+          '';
+
+        if (
+          mountedRef.current
+        ) {
+          setInput(
+            ''
+          );
+
+          setInterimTranscript(
+            ''
+          );
+        }
+
+        handleSendDirect(
+          finalText
+        );
+
+      } catch (
+        error
+      ) {
         console.log(
           'Speech result processing error:',
-          error?.message || error
+          error?.message ||
+            error
         );
+
+        finalResultHandledRef.current =
+          false;
       }
     }
   );
@@ -954,10 +1925,12 @@ export default function TutorChatScreen({
     'error',
     (event) => {
       const errorCode =
-        event?.error || '';
+        event?.error ||
+        '';
 
       const errorMessage =
-        event?.message || '';
+        event?.message ||
+        '';
 
       console.log(
         '🎙️ Speech recognition error:',
@@ -965,15 +1938,16 @@ export default function TutorChatScreen({
         errorMessage
       );
 
-      recognitionRunningRef.current = false;
+      recognitionRunningRef.current =
+        false;
 
-      if (mountedRef.current) {
-        setListening(false);
+      if (
+        mountedRef.current
+      ) {
+        setListening(
+          false
+        );
       }
-
-      // --------------------------------------------------------
-      // INTENTIONAL ABORT
-      // --------------------------------------------------------
 
       if (
         errorCode === 'aborted' &&
@@ -986,70 +1960,47 @@ export default function TutorChatScreen({
         return;
       }
 
-      // --------------------------------------------------------
-      // NETWORK ERROR
-      // --------------------------------------------------------
-
       if (
-        errorCode === 'network'
+        errorCode ===
+        'no-speech'
       ) {
-        if (mountedRef.current) {
-          setVoiceError(
-            'Speech service network error. Retrying...'
-          );
-        }
+        console.log(
+          '🎙️ Android reported no-speech.'
+        );
 
         if (
-          mountedRef.current &&
-          sessionActiveRef.current &&
-          !sendingRef.current &&
-          !isSpeakingRef.current
+          mountedRef.current
         ) {
-          if (
-            recognitionRetryTimeoutRef.current
-          ) {
-            clearTimeout(
-              recognitionRetryTimeoutRef.current
-            );
-          }
-
-          recognitionRetryTimeoutRef.current =
-            setTimeout(() => {
-              recognitionRetryTimeoutRef.current =
-                null;
-
-              if (
-                mountedRef.current &&
-                sessionActiveRef.current &&
-                !sendingRef.current &&
-                !isSpeakingRef.current &&
-                !recognitionRunningRef.current
-              ) {
-                console.log(
-                  '🎙️ Retrying speech recognition...'
-                );
-
-                setVoiceError('');
-
-                intentionalRecognitionStopRef.current =
-                  false;
-
-                startContinuousListening();
-              }
-            }, 1500);
+          setVoiceError(
+            'No speech detected. Tap the microphone and speak clearly.'
+          );
         }
 
         return;
       }
 
-      // --------------------------------------------------------
-      // PERMISSION ERROR
-      // --------------------------------------------------------
+      if (
+        errorCode ===
+        'network'
+      ) {
+        if (
+          mountedRef.current
+        ) {
+          setVoiceError(
+            'Speech service network error. Tap the microphone to try again.'
+          );
+        }
+
+        return;
+      }
 
       if (
-        errorCode === 'not-allowed'
+        errorCode ===
+        'not-allowed'
       ) {
-        if (mountedRef.current) {
+        if (
+          mountedRef.current
+        ) {
           setVoiceError(
             'Microphone permission was denied.'
           );
@@ -1058,43 +2009,31 @@ export default function TutorChatScreen({
         return;
       }
 
-      // --------------------------------------------------------
-      // NO SPEECH
-      // --------------------------------------------------------
-
       if (
-        errorCode === 'no-speech'
+        errorCode ===
+        'aborted'
       ) {
-        if (mountedRef.current) {
-          setVoiceError('');
+        console.log(
+          '🎙️ Recognition aborted.'
+        );
+
+        if (
+          mountedRef.current
+        ) {
+          setVoiceError(
+            ''
+          );
         }
 
         return;
       }
 
-      // --------------------------------------------------------
-      // OTHER ABORTED EVENTS
-      // --------------------------------------------------------
-
       if (
-        errorCode === 'aborted'
+        mountedRef.current
       ) {
-        // Do not create another abort loop.
-        if (mountedRef.current) {
-          setVoiceError('');
-        }
-
-        return;
-      }
-
-      // --------------------------------------------------------
-      // OTHER ERRORS
-      // --------------------------------------------------------
-
-      if (mountedRef.current) {
         setVoiceError(
           errorMessage ||
-          'Speech recognition error.'
+            'Speech recognition error.'
         );
       }
     }
@@ -1102,1346 +2041,1685 @@ export default function TutorChatScreen({
 
 
   // ============================================================
-  // SCHEDULE VOICE TURN
+  // LEGACY VOICE TURN FUNCTIONS
   // ============================================================
 
-  const scheduleVoiceTurn = () => {
-    if (turnEndTimeoutRef.current) {
-      clearTimeout(
+  const scheduleVoiceTurn =
+    () => {
+      if (
         turnEndTimeoutRef.current
+      ) {
+        clearTimeout(
+          turnEndTimeoutRef.current
+        );
+      }
+
+      turnEndTimeoutRef.current =
+        setTimeout(
+          () => {
+            turnEndTimeoutRef.current =
+              null;
+
+            flushVoiceTurn();
+          },
+          700
+        );
+    };
+
+
+  const flushVoiceTurn =
+    () => {
+      const finalText =
+        speechSegmentBufferRef.current.trim();
+
+      if (
+        !finalText
+      ) {
+        return;
+      }
+
+      speechSegmentBufferRef.current =
+        '';
+
+      finalTranscriptRef.current =
+        '';
+
+      setInput(
+        ''
       );
-    }
 
-    turnEndTimeoutRef.current =
-      setTimeout(() => {
-        turnEndTimeoutRef.current = null;
+      setInterimTranscript(
+        ''
+      );
 
-        flushVoiceTurn();
-      }, 700);
-  };
+      console.log(
+        '🎙️ FINAL USER SPEECH:',
+        finalText
+      );
 
-
-  // ============================================================
-  // FLUSH VOICE TURN
-  // ============================================================
-
-  const flushVoiceTurn = () => {
-    const finalText =
-      speechSegmentBufferRef.current
-        .trim();
-
-    if (!finalText) {
-      return;
-    }
-
-    speechSegmentBufferRef.current = '';
-    finalTranscriptRef.current = '';
-
-    setInput('');
-    setInterimTranscript('');
-
-    console.log(
-      '🎙️ FINAL USER SPEECH:',
-      finalText
-    );
-
-    handleSendDirect(finalText);
-  };
+      handleSendDirect(
+        finalText
+      );
+    };
 
 
   // ============================================================
   // SPEAK MESSAGE
   // ============================================================
 
-  const speakMessage = async (
-    message
-  ) => {
-    if (
-      !message ||
-      !mountedRef.current
-    ) {
-      return;
-    }
+  const speakMessage =
+    async (
+      message
+    ) => {
+      if (
+        !message ||
+        !mountedRef.current
+      ) {
+        return;
+      }
 
-    const text =
-      message?.data?.reply ||
-      message?.reply ||
-      message?.text ||
-      '';
-
-    if (
-      !text ||
-      !text.trim()
-    ) {
-      return;
-    }
-
-    try {
-      // --------------------------------------------------------
-      // Stop recognition BEFORE AI speaks.
-      // --------------------------------------------------------
+      const text =
+        message?.data?.reply ||
+        message?.reply ||
+        message?.text ||
+        '';
 
       if (
-        recognitionRunningRef.current
+        !text ||
+        !text.trim()
       ) {
-        await stopRecognition(true);
+        return;
       }
 
-      await Speech.stop();
-
-      const messageId =
-        message.id;
-
-      currentSpeakingIdRef.current =
-        messageId;
-
-      isSpeakingRef.current = true;
-
-      setSpeakingId(messageId);
-      setIsPlaying(true);
-
-      let selectedVoice = null;
-
-      const preferredVoice =
-        message.preferredVoice ||
-        preferredVoiceRef.current;
-
-      if (preferredVoice) {
-        selectedVoice =
-          availableVoices.find(
-            (voice) =>
-              voice.identifier ===
-                preferredVoice ||
-              voice.name ===
-                preferredVoice
+      try {
+        if (
+          recognitionRunningRef.current
+        ) {
+          await stopRecognition(
+            true
           );
-      }
+        }
 
-      const languageVoices =
-        availableVoices.filter(
-          (voice) => {
-            if (!voice?.language) {
-              return false;
-            }
+        await Speech.stop();
 
-            return (
-              voice.language.toLowerCase() ===
-              speechLang.toLowerCase()
-            );
-          }
+        const messageId =
+          message.id;
+
+        currentSpeakingIdRef.current =
+          messageId;
+
+        isSpeakingRef.current =
+          true;
+
+        setSpeakingId(
+          messageId
         );
 
-      if (
-        !selectedVoice &&
-        languageVoices.length > 0
+        setIsPlaying(
+          true
+        );
+
+        let selectedVoice =
+          null;
+
+        const preferredVoice =
+          message.preferredVoice ||
+          preferredVoiceRef.current;
+
+        if (
+          preferredVoice
+        ) {
+          selectedVoice =
+            availableVoices.find(
+              (
+                voice
+              ) =>
+                voice.identifier ===
+                  preferredVoice ||
+                voice.name ===
+                  preferredVoice
+            );
+        }
+
+        const languageVoices =
+          availableVoices.filter(
+            (
+              voice
+            ) => {
+              if (
+                !voice?.language
+              ) {
+                return false;
+              }
+
+              return (
+                voice.language.toLowerCase() ===
+                speechLang.toLowerCase()
+              );
+            }
+          );
+
+        if (
+          !selectedVoice &&
+          languageVoices.length > 0
+        ) {
+          selectedVoice =
+            languageVoices[0];
+        }
+
+        const speechOptions = {
+          language:
+            selectedVoice?.language ||
+            speechLang,
+
+          voice:
+            selectedVoice?.identifier ||
+            undefined,
+
+          rate:
+            0.95,
+
+          pitch:
+            1.0,
+
+          onStart:
+            () => {
+              isSpeakingRef.current =
+                true;
+
+              if (
+                mountedRef.current
+              ) {
+                setIsPlaying(
+                  true
+                );
+
+                setSpeakingId(
+                  messageId
+                );
+              }
+            },
+
+          onDone:
+            () => {
+              isSpeakingRef.current =
+                false;
+
+              currentSpeakingIdRef.current =
+                null;
+
+              if (
+                mountedRef.current
+              ) {
+                setIsPlaying(
+                  false
+                );
+
+                setSpeakingId(
+                  null
+                );
+              }
+
+              if (
+                mountedRef.current &&
+                sessionActiveRef.current
+              ) {
+                setTimeout(
+                  () => {
+                    if (
+                      mountedRef.current &&
+                      sessionActiveRef.current &&
+                      !sendingRef.current &&
+                      !isSpeakingRef.current &&
+                      !recognitionRunningRef.current &&
+                      !micDiagnosticRunningRef.current
+                    ) {
+                      console.log(
+                        '🎙️ AI finished speaking. Starting microphone...'
+                      );
+
+                      intentionalRecognitionStopRef.current =
+                        false;
+
+                      startContinuousListening();
+                    }
+                  },
+                  500
+                );
+              }
+            },
+
+          onStopped:
+            () => {
+              isSpeakingRef.current =
+                false;
+
+              currentSpeakingIdRef.current =
+                null;
+
+              if (
+                mountedRef.current
+              ) {
+                setIsPlaying(
+                  false
+                );
+
+                setSpeakingId(
+                  null
+                );
+              }
+
+              if (
+                mountedRef.current &&
+                sessionActiveRef.current &&
+                !sendingRef.current &&
+                !micDiagnosticRunningRef.current
+              ) {
+                setTimeout(
+                  () => {
+                    if (
+                      mountedRef.current &&
+                      sessionActiveRef.current &&
+                      !sendingRef.current &&
+                      !isSpeakingRef.current &&
+                      !recognitionRunningRef.current &&
+                      !micDiagnosticRunningRef.current
+                    ) {
+                      console.log(
+                        '🎙️ TTS stopped. Starting microphone...'
+                      );
+
+                      intentionalRecognitionStopRef.current =
+                        false;
+
+                      startContinuousListening();
+                    }
+                  },
+                  500
+                );
+              }
+            },
+
+          onError:
+            (
+              error
+            ) => {
+              console.log(
+                '🔊 Speech synthesis error:',
+                error
+              );
+
+              isSpeakingRef.current =
+                false;
+
+              currentSpeakingIdRef.current =
+                null;
+
+              if (
+                mountedRef.current
+              ) {
+                setIsPlaying(
+                  false
+                );
+
+                setSpeakingId(
+                  null
+                );
+              }
+
+              if (
+                mountedRef.current &&
+                sessionActiveRef.current &&
+                !sendingRef.current &&
+                !micDiagnosticRunningRef.current
+              ) {
+                setTimeout(
+                  () => {
+                    if (
+                      mountedRef.current &&
+                      sessionActiveRef.current &&
+                      !sendingRef.current &&
+                      !isSpeakingRef.current &&
+                      !recognitionRunningRef.current &&
+                      !micDiagnosticRunningRef.current
+                    ) {
+                      console.log(
+                        '🎙️ TTS error. Starting microphone...'
+                      );
+
+                      intentionalRecognitionStopRef.current =
+                        false;
+
+                      startContinuousListening();
+                    }
+                  },
+                  700
+                );
+              }
+            },
+        };
+
+        console.log(
+          '🔊 Speaking tutor response:',
+          text
+        );
+
+        Speech.speak(
+          text.trim(),
+          speechOptions
+        );
+
+      } catch (
+        error
       ) {
-        selectedVoice =
-          languageVoices[0];
-      }
+        console.log(
+          'speakMessage error:',
+          error?.message ||
+            error
+        );
 
-      const speechOptions = {
-        language:
-          selectedVoice?.language ||
-          speechLang,
+        isSpeakingRef.current =
+          false;
 
-        voice:
-          selectedVoice?.identifier ||
-          undefined,
+        currentSpeakingIdRef.current =
+          null;
 
-        rate: 0.95,
+        if (
+          mountedRef.current
+        ) {
+          setIsPlaying(
+            false
+          );
 
-        pitch: 1.0,
+          setSpeakingId(
+            null
+          );
+        }
 
-        onStart: () => {
-          isSpeakingRef.current = true;
-
-          if (mountedRef.current) {
-            setIsPlaying(true);
-            setSpeakingId(messageId);
-          }
-        },
-
-        onDone: () => {
-          isSpeakingRef.current = false;
-
-          currentSpeakingIdRef.current =
-            null;
-
-          if (mountedRef.current) {
-            setIsPlaying(false);
-            setSpeakingId(null);
-          }
-
-          // ----------------------------------------------------
-          // AI finished speaking.
-          // Start microphone again.
-          // ----------------------------------------------------
-
-          if (
-            mountedRef.current &&
-            sessionActiveRef.current
-          ) {
-            setTimeout(() => {
+        if (
+          mountedRef.current &&
+          sessionActiveRef.current &&
+          !sendingRef.current &&
+          !micDiagnosticRunningRef.current
+        ) {
+          setTimeout(
+            () => {
               if (
                 mountedRef.current &&
                 sessionActiveRef.current &&
                 !sendingRef.current &&
                 !isSpeakingRef.current &&
-                !recognitionRunningRef.current
+                !recognitionRunningRef.current &&
+                !micDiagnosticRunningRef.current
               ) {
-                console.log(
-                  '🎙️ AI finished speaking. Starting microphone...'
-                );
-
                 intentionalRecognitionStopRef.current =
                   false;
 
                 startContinuousListening();
               }
-            }, 400);
-          }
-        },
-
-        onStopped: () => {
-          isSpeakingRef.current = false;
-
-          currentSpeakingIdRef.current =
-            null;
-
-          if (mountedRef.current) {
-            setIsPlaying(false);
-            setSpeakingId(null);
-          }
-
-          // Only restart if the live tutor session
-          // is genuinely active.
-          if (
-            mountedRef.current &&
-            sessionActiveRef.current &&
-            !sendingRef.current
-          ) {
-            setTimeout(() => {
-              if (
-                mountedRef.current &&
-                sessionActiveRef.current &&
-                !sendingRef.current &&
-                !isSpeakingRef.current &&
-                !recognitionRunningRef.current
-              ) {
-                startContinuousListening();
-              }
-            }, 400);
-          }
-        },
-
-        onError: (error) => {
-          console.log(
-            '🔊 Speech synthesis error:',
-            error
+            },
+            700
           );
-
-          isSpeakingRef.current = false;
-
-          currentSpeakingIdRef.current =
-            null;
-
-          if (mountedRef.current) {
-            setIsPlaying(false);
-            setSpeakingId(null);
-          }
-
-          if (
-            mountedRef.current &&
-            sessionActiveRef.current &&
-            !sendingRef.current
-          ) {
-            setTimeout(() => {
-              if (
-                mountedRef.current &&
-                sessionActiveRef.current &&
-                !sendingRef.current &&
-                !isSpeakingRef.current &&
-                !recognitionRunningRef.current
-              ) {
-                startContinuousListening();
-              }
-            }, 700);
-          }
-        },
-      };
-
-      console.log(
-        '🔊 Speaking tutor response:',
-        text
-      );
-
-      Speech.speak(
-        text.trim(),
-        speechOptions
-      );
-
-    } catch (error) {
-      console.log(
-        'speakMessage error:',
-        error?.message || error
-      );
-
-      isSpeakingRef.current = false;
-
-      currentSpeakingIdRef.current =
-        null;
-
-      if (mountedRef.current) {
-        setIsPlaying(false);
-        setSpeakingId(null);
+        }
       }
-    }
-  };
+    };
 
 
   // ============================================================
   // SCHEDULE SPEECH
   // ============================================================
 
-  const scheduleSpeech = (
-    message,
-    delay = 300
-  ) => {
-    if (speechTimeoutRef.current) {
-      clearTimeout(
+  const scheduleSpeech =
+    (
+      message,
+      delay = 300
+    ) => {
+      if (
         speechTimeoutRef.current
-      );
-    }
+      ) {
+        clearTimeout(
+          speechTimeoutRef.current
+        );
+      }
 
-    speechTimeoutRef.current =
-      setTimeout(() => {
-        speechTimeoutRef.current =
-          null;
+      speechTimeoutRef.current =
+        setTimeout(
+          () => {
+            speechTimeoutRef.current =
+              null;
 
-        if (
-          mountedRef.current &&
-          message
-        ) {
-          speakMessage(message);
-        }
-      }, delay);
-  };
+            if (
+              mountedRef.current &&
+              message
+            ) {
+              speakMessage(
+                message
+              );
+            }
+          },
+          delay
+        );
+    };
 
 
   // ============================================================
   // PLAY / PAUSE AUDIO
   // ============================================================
 
-  const handlePlayPauseAudio = async (
-    message
-  ) => {
-    try {
-      if (
-        isSpeakingRef.current &&
-        currentSpeakingIdRef.current ===
-          message.id
+  const handlePlayPauseAudio =
+    async (
+      message
+    ) => {
+      try {
+        if (
+          isSpeakingRef.current &&
+          currentSpeakingIdRef.current ===
+            message.id
+        ) {
+          await Speech.stop();
+
+          isSpeakingRef.current =
+            false;
+
+          currentSpeakingIdRef.current =
+            null;
+
+          setIsPlaying(
+            false
+          );
+
+          setSpeakingId(
+            null
+          );
+
+          return;
+        }
+
+        await speakMessage(
+          message
+        );
+
+      } catch (
+        error
       ) {
-        // This is a manual speaker-button stop.
-        // Do not restart recognition because this
-        // isn't necessarily an active live turn.
-        await Speech.stop();
-
-        isSpeakingRef.current = false;
-
-        currentSpeakingIdRef.current =
-          null;
-
-        setIsPlaying(false);
-        setSpeakingId(null);
-
-        return;
+        console.log(
+          'Audio toggle error:',
+          error?.message ||
+            error
+        );
       }
-
-      await speakMessage(message);
-
-    } catch (error) {
-      console.log(
-        'Audio toggle error:',
-        error?.message || error
-      );
-    }
-  };
+    };
 
 
   // ============================================================
   // START LIVE SESSION
   // ============================================================
 
-  const startLiveSession = async () => {
-    try {
-      console.log(
-        '🎙️ Starting live tutor session'
-      );
-
-      sessionActiveRef.current = true;
-
-      intentionalRecognitionStopRef.current =
-        false;
-
-      setIsSessionActive(true);
-      setVoiceError('');
-
-      speechSegmentBufferRef.current = '';
-      finalTranscriptRef.current = '';
-
-      if (
-        recognitionRetryTimeoutRef.current
-      ) {
-        clearTimeout(
-          recognitionRetryTimeoutRef.current
+  const startLiveSession =
+    async () => {
+      try {
+        console.log(
+          '🎙️ Starting live tutor session'
         );
 
-        recognitionRetryTimeoutRef.current =
-          null;
+        sessionActiveRef.current =
+          true;
+
+        intentionalRecognitionStopRef.current =
+          false;
+
+        finalResultHandledRef.current =
+          false;
+
+        setIsSessionActive(
+          true
+        );
+
+        setVoiceError(
+          ''
+        );
+
+        speechSegmentBufferRef.current =
+          '';
+
+        finalTranscriptRef.current =
+          '';
+
+        if (
+          recognitionRetryTimeoutRef.current
+        ) {
+          clearTimeout(
+            recognitionRetryTimeoutRef.current
+          );
+
+          recognitionRetryTimeoutRef.current =
+            null;
+        }
+
+        await stopAllSpeech();
+
+        await new Promise(
+          (
+            resolve
+          ) =>
+            setTimeout(
+              resolve,
+              300
+            )
+        );
+
+        await startContinuousListening();
+
+      } catch (
+        error
+      ) {
+        console.log(
+          'startLiveSession error:',
+          error?.message ||
+            error
+        );
       }
-
-      await stopAllSpeech();
-
-      await new Promise(
-        (resolve) =>
-          setTimeout(resolve, 300)
-      );
-
-      await startContinuousListening();
-
-    } catch (error) {
-      console.log(
-        'startLiveSession error:',
-        error?.message || error
-      );
-    }
-  };
+    };
 
 
   // ============================================================
   // STOP LIVE SESSION
   // ============================================================
 
-  const stopLiveSession = async () => {
-    console.log(
-      '🎙️ Stopping live tutor session'
-    );
+  const stopLiveSession =
+    async () => {
+      console.log(
+        '🎙️ Stopping live tutor session'
+      );
 
-    sessionActiveRef.current = false;
+      sessionActiveRef.current =
+        false;
 
-    setIsSessionActive(false);
+      setIsSessionActive(
+        false
+      );
 
-    intentionalRecognitionStopRef.current =
-      true;
+      intentionalRecognitionStopRef.current =
+        true;
 
-    await stopRecognition(true);
+      await stopRecognition(
+        true
+      );
 
-    await stopAllSpeech();
+      await stopAllSpeech();
 
-    speechSegmentBufferRef.current = '';
-    finalTranscriptRef.current = '';
+      speechSegmentBufferRef.current =
+        '';
 
-    setInterimTranscript('');
-    setInput('');
-    setVoiceError('');
-  };
+      finalTranscriptRef.current =
+        '';
+
+      finalResultHandledRef.current =
+        false;
+
+      setInterimTranscript(
+        ''
+      );
+
+      setInput(
+        ''
+      );
+
+      setVoiceError(
+        ''
+      );
+    };
+
+
+  // ============================================================
+  // RETRY CURRENT LISTENING TURN
+  // ============================================================
+
+  const retryListening =
+    async () => {
+      if (
+        !mountedRef.current ||
+        !sessionActiveRef.current
+      ) {
+        return;
+      }
+
+      if (
+        sendingRef.current ||
+        isSpeakingRef.current ||
+        recognitionRunningRef.current ||
+        recognitionStartingRef.current ||
+        micDiagnosticRunningRef.current
+      ) {
+        return;
+      }
+
+      console.log(
+        '🎙️ User requested another microphone turn'
+      );
+
+      setVoiceError(
+        ''
+      );
+
+      finalResultHandledRef.current =
+        false;
+
+      speechSegmentBufferRef.current =
+        '';
+
+      finalTranscriptRef.current =
+        '';
+
+      intentionalRecognitionStopRef.current =
+        false;
+
+      await startContinuousListening();
+    };
 
 
   // ============================================================
   // SCENARIO SELECT
   // ============================================================
 
-  const handleScenarioSelect = async (
-    scenarioKey
-  ) => {
-    const scenario =
-      ROLEPLAY_SCENARIOS[
-        scenarioKey
-      ];
-
-    if (!scenario) return;
-
-    setSelectedScenario(
+  const handleScenarioSelect =
+    async (
       scenarioKey
-    );
+    ) => {
+      const scenario =
+        ROLEPLAY_SCENARIOS[
+          scenarioKey
+        ];
 
-    try {
-      if (userIdRef.current) {
-        await supabase
-          .from('user_profiles')
-          .update({
-            current_scenario:
-              scenarioKey,
-
-            scenario_objective:
-              scenario.objective,
-          })
-          .eq(
-            'id',
-            userIdRef.current
-          );
+      if (
+        !scenario
+      ) {
+        return;
       }
-    } catch (error) {
-      console.log(
-        'Scenario save error:',
-        error?.message || error
+
+      setSelectedScenario(
+        scenarioKey
       );
-    }
-  };
+
+      try {
+        if (
+          userIdRef.current
+        ) {
+          await supabase
+            .from(
+              'user_profiles'
+            )
+            .update({
+              current_scenario:
+                scenarioKey,
+
+              scenario_objective:
+                scenario.objective,
+            })
+            .eq(
+              'id',
+              userIdRef.current
+            );
+        }
+
+      } catch (
+        error
+      ) {
+        console.log(
+          'Scenario save error:',
+          error?.message ||
+            error
+        );
+      }
+    };
 
 
   // ============================================================
   // EXTRACT AI RESPONSE
   // ============================================================
 
-  const extractResponsePayload = (
-    data
-  ) => {
-    let raw = null;
+  const extractResponsePayload =
+    (
+      data
+    ) => {
+      let raw =
+        null;
 
-    if (
-      typeof data === 'string'
-    ) {
-      raw = data;
+      if (
+        typeof data ===
+        'string'
+      ) {
+        raw =
+          data;
 
-    } else if (
-      data?.response !== undefined
-    ) {
-      raw = data.response;
+      } else if (
+        data?.response !==
+        undefined
+      ) {
+        raw =
+          data.response;
 
-    } else if (
-      data?.reply !== undefined
-    ) {
-      raw = data.reply;
+      } else if (
+        data?.reply !==
+        undefined
+      ) {
+        raw =
+          data.reply;
 
-    } else if (
-      data?.message !== undefined
-    ) {
-      raw = data.message;
+      } else if (
+        data?.message !==
+        undefined
+      ) {
+        raw =
+          data.message;
 
-    } else if (
-      data?.choices?.[0]?.message?.content
-    ) {
-      raw =
-        data.choices[0]
-          .message
-          .content;
+      } else if (
+        data?.choices?.[0]?.message?.content
+      ) {
+        raw =
+          data.choices[0]
+            .message
+            .content;
 
-    } else {
-      raw = data;
-    }
-
-    if (
-      typeof raw === 'string'
-    ) {
-      const cleaned =
-        raw
-          .replace(
-            /^```json\s*/i,
-            ''
-          )
-          .replace(
-            /^```\s*/i,
-            ''
-          )
-          .replace(
-            /\s*```$/i,
-            ''
-          )
-          .trim();
-
-      try {
-        return JSON.parse(
-          cleaned
-        );
-      } catch (_) {
-        return {
-          reply: raw,
-        };
+      } else {
+        raw =
+          data;
       }
-    }
 
-    return raw || {};
-  };
+      if (
+        typeof raw ===
+        'string'
+      ) {
+        const cleaned =
+          raw
+            .replace(
+              /^```json\s*/i,
+              ''
+            )
+            .replace(
+              /^```\s*/i,
+              ''
+            )
+            .replace(
+              /\s*```$/i,
+              ''
+            )
+            .trim();
+
+        try {
+          return JSON.parse(
+            cleaned
+          );
+
+        } catch (
+          _
+        ) {
+          return {
+            reply:
+              raw,
+          };
+        }
+      }
+
+      return (
+        raw || {}
+      );
+    };
 
 
   // ============================================================
   // HANDLE SEND
   // ============================================================
 
-  const handleSend = () => {
-    const cleanMessage =
-      input.trim();
+  const handleSend =
+    () => {
+      const cleanMessage =
+        input.trim();
 
-    if (!cleanMessage) {
-      return;
-    }
+      if (
+        !cleanMessage
+      ) {
+        return;
+      }
 
-    handleSendDirect(
-      cleanMessage
-    );
-  };
+      handleSendDirect(
+        cleanMessage
+      );
+    };
 
 
   // ============================================================
   // HANDLE SEND DIRECT
   // ============================================================
 
-  const handleSendDirect = async (
-    cleanMessage
-  ) => {
-    const messageText =
-      String(
-        cleanMessage || ''
-      ).trim();
+  const handleSendDirect =
+    async (
+      cleanMessage
+    ) => {
+      const messageText =
+        String(
+          cleanMessage ||
+            ''
+        ).trim();
 
-    if (!messageText) {
-      return;
-    }
+      if (
+        !messageText
+      ) {
+        return;
+      }
 
-    if (sendingRef.current) {
-      console.log(
-        'Ignoring duplicate AI request.'
-      );
+      if (
+        sendingRef.current
+      ) {
+        console.log(
+          'Ignoring duplicate AI request.'
+        );
 
-      return;
-    }
+        return;
+      }
 
-    sendingRef.current = true;
+      sendingRef.current =
+        true;
 
-    try {
-      // --------------------------------------------------------
-      // STOP MICROPHONE WHILE AI PROCESSES
-      // --------------------------------------------------------
+      try {
+        await stopRecognition(
+          true
+        );
 
-      await stopRecognition(true);
+        setInput(
+          ''
+        );
 
-      setInput('');
-      setInterimTranscript('');
-      setLoading(true);
+        setInterimTranscript(
+          ''
+        );
 
-      // --------------------------------------------------------
-      // USER MESSAGE
-      // --------------------------------------------------------
+        setLoading(
+          true
+        );
 
-      const userMessage = {
-        id:
-          `user-${Date.now()}-${Math.random()}`,
+        const userMessage = {
+          id:
+            `user-${Date.now()}-${Math.random()}`,
 
-        role: 'user',
+          role:
+            'user',
 
-        type: 'user',
+          type:
+            'user',
 
-        text: messageText,
-      };
+          text:
+            messageText,
+        };
 
-      setMessages(
-        (previous) => [
-          ...previous,
-          userMessage,
-        ]
-      );
+        setMessages(
+          (
+            previous
+          ) => [
+            ...previous,
+            userMessage,
+          ]
+        );
 
-      conversationHistoryRef.current = [
-        ...conversationHistoryRef.current,
+        conversationHistoryRef.current =
+          [
+            ...conversationHistoryRef.current,
 
-        {
-          role: 'user',
-          content: messageText,
-        },
-      ];
-
-      const scenario =
-        ROLEPLAY_SCENARIOS[
-          selectedScenario
-        ] ||
-        ROLEPLAY_SCENARIOS.introduction;
-
-      // --------------------------------------------------------
-      // CONVERSATION HISTORY
-      // --------------------------------------------------------
-
-      const conversationHistory =
-        conversationHistoryRef.current
-          .slice(-20)
-          .map(
-            (item) => ({
+            {
               role:
-                item.role,
+                'user',
+
               content:
-                item.content,
-            })
-          );
-
-      console.log(
-        '🤖 Sending conversation to AI:',
-        conversationHistory.length,
-        'messages'
-      );
-
-      console.log(
-        '🤖 Target language:',
-        targetLanguageRef.current
-      );
-
-      console.log(
-        '🤖 Level:',
-        levelRef.current
-      );
-
-      // --------------------------------------------------------
-      // SUPABASE EDGE FUNCTION
-      // --------------------------------------------------------
-
-      const {
-        data,
-        error,
-      } =
-        await supabase.functions.invoke(
-          'ai-proxy',
-          {
-            body: {
-              prompt:
                 messageText,
-
-              message:
-                messageText,
-
-              targetLanguage:
-                targetLanguageRef.current ||
-                'English',
-
-              level:
-                levelRef.current ||
-                'Beginner',
-
-              mode:
-                'voice-tutor',
-
-              day:
-                currentDayNum,
-
-              currentScenario:
-                selectedScenario,
-
-              scenarioObjective:
-                scenario.objective,
-
-              conversationHistory,
-
-              messages:
-                conversationHistory,
             },
-          }
+          ];
+
+        const scenario =
+          ROLEPLAY_SCENARIOS[
+            selectedScenario
+          ] ||
+          ROLEPLAY_SCENARIOS
+            .introduction;
+
+        const conversationHistory =
+          conversationHistoryRef.current
+            .slice(-20)
+            .map(
+              (
+                item
+              ) => ({
+                role:
+                  item.role,
+
+                content:
+                  item.content,
+              })
+            );
+
+        console.log(
+          '🤖 Sending conversation to AI:',
+          conversationHistory.length,
+          'messages'
         );
 
-      if (error) {
-  console.log('========================================');
-  console.log('❌ SUPABASE EDGE FUNCTION ERROR');
-  console.log('Error name:', error?.name);
-  console.log('Error message:', error?.message);
-  console.log('Error status:', error?.status);
-  console.log('Error context:', error?.context);
-  console.log('Error details:', error?.details);
-
-  try {
-    if (error?.context) {
-      const responseText = await error.context.text();
-
-      console.log(
-        'Edge Function HTTP response:',
-        responseText
-      );
-    }
-  } catch (readError) {
-    console.log(
-      'Could not read Edge Function error response:',
-      readError?.message || readError
-    );
-  }
-
-  console.log('========================================');
-
-  throw error;
-}
-
-      if (
-        !data ||
-        data.success === false
-      ) {
-        throw new Error(
-          data?.error ||
-          data?.message ||
-          'AI tutor returned an invalid response.'
-        );
-      }
-
-      console.log(
-        '🤖 AI response received'
-      );
-
-      // --------------------------------------------------------
-      // PARSE RESPONSE
-      // --------------------------------------------------------
-
-      const parsed =
-        extractResponsePayload(
-          data
+        console.log(
+          '🤖 Target language:',
+          targetLanguageRef.current
         );
 
-      let reply =
-        parsed?.reply ||
-        parsed?.response ||
-        parsed?.message ||
-        '';
+        console.log(
+          '🤖 Level:',
+          levelRef.current
+        );
 
-      if (
-        typeof reply !== 'string'
-      ) {
-        reply =
-          String(
-            reply || ''
+        const {
+          data,
+          error,
+        } =
+          await supabase.functions.invoke(
+            'ai-proxy',
+            {
+              body: {
+                prompt:
+                  messageText,
+
+                message:
+                  messageText,
+
+                targetLanguage:
+                  targetLanguageRef.current ||
+                  'English',
+
+                level:
+                  levelRef.current ||
+                  'Beginner',
+
+                mode:
+                  'voice-tutor',
+
+                day:
+                  currentDayNum,
+
+                currentScenario:
+                  selectedScenario,
+
+                scenarioObjective:
+                  scenario.objective,
+
+                conversationHistory,
+
+                messages:
+                  conversationHistory,
+              },
+            }
           );
-      }
 
-      reply =
-        reply.trim();
+        if (
+          error
+        ) {
+          console.log(
+            '========================================'
+          );
 
-      if (!reply) {
-        throw new Error(
-          'AI tutor returned an empty response.'
+          console.log(
+            '❌ SUPABASE EDGE FUNCTION ERROR'
+          );
+
+          console.log(
+            'Error name:',
+            error?.name
+          );
+
+          console.log(
+            'Error message:',
+            error?.message
+          );
+
+          console.log(
+            'Error status:',
+            error?.status
+          );
+
+          console.log(
+            'Error context:',
+            error?.context
+          );
+
+          console.log(
+            'Error details:',
+            error?.details
+          );
+
+          try {
+            if (
+              error?.context
+            ) {
+              const responseText =
+                await error.context.text();
+
+              console.log(
+                'Edge Function HTTP response:',
+                responseText
+              );
+            }
+          } catch (
+            readError
+          ) {
+            console.log(
+              'Could not read Edge Function error response:',
+              readError?.message ||
+                readError
+            );
+          }
+
+          console.log(
+            '========================================'
+          );
+
+          throw error;
+        }
+
+        if (
+          !data ||
+          data.success ===
+            false
+        ) {
+          throw new Error(
+            data?.error ||
+              data?.message ||
+              'AI tutor returned an invalid response.'
+          );
+        }
+
+        console.log(
+          '🤖 AI response received'
         );
-      }
 
-      // --------------------------------------------------------
-      // TUTOR MESSAGE
-      // --------------------------------------------------------
+        const parsed =
+          extractResponsePayload(
+            data
+          );
 
-      const tutorMessage = {
-        id:
-          `tutor-${Date.now()}-${Math.random()}`,
+        let reply =
+          parsed?.reply ||
+          parsed?.response ||
+          parsed?.message ||
+          '';
 
-        role: 'assistant',
+        if (
+          typeof reply !==
+          'string'
+        ) {
+          reply =
+            String(
+              reply ||
+                ''
+            );
+        }
 
-        type: 'tutor',
+        reply =
+          reply.trim();
 
-        text: reply,
+        if (
+          !reply
+        ) {
+          throw new Error(
+            'AI tutor returned an empty response.'
+          );
+        }
 
-        preferredVoice:
-          preferredVoiceRef.current,
+        const tutorMessage = {
+          id:
+            `tutor-${Date.now()}-${Math.random()}`,
 
-        data: {
-          ...parsed,
-
-          reply,
-
-          hasCorrection:
-            Boolean(
-              parsed?.hasCorrection
-            ),
-
-          originalText:
-            parsed?.originalText ||
-            '',
-
-          correctedText:
-            parsed?.correctedText ||
-            '',
-
-          explanation:
-            parsed?.explanation ||
-            '',
-
-          pronunciationScore:
-            parsed?.pronunciationScore ??
-            null,
-
-          tip:
-            parsed?.tip ||
-            '',
-
-          roleplayContext:
-            parsed?.roleplayContext ||
-            selectedScenario,
-
-          objective:
-            parsed?.objective ||
-            scenario.objective,
-
-          stage:
-            parsed?.stage ||
-            '',
-        },
-      };
-
-      // --------------------------------------------------------
-      // SAVE AI RESPONSE TO HISTORY
-      // --------------------------------------------------------
-
-      conversationHistoryRef.current = [
-        ...conversationHistoryRef.current,
-
-        {
           role:
             'assistant',
 
-          content:
+          type:
+            'tutor',
+
+          text:
             reply,
-        },
-      ];
 
-      // --------------------------------------------------------
-      // DISPLAY AI MESSAGE
-      // --------------------------------------------------------
+          preferredVoice:
+            preferredVoiceRef.current,
 
-      setMessages(
-        (previous) => [
-          ...previous,
-          tutorMessage,
-        ]
-      );
+          data: {
+            ...parsed,
 
-      // --------------------------------------------------------
-      // SAVE GRAMMAR CORRECTION
-      // --------------------------------------------------------
+            reply,
 
-      if (
-        parsed?.hasCorrection &&
-        parsed?.correctedText
-      ) {
-        await logGrammarCorrection({
-          originalText:
-            parsed.originalText ||
-            messageText,
+            hasCorrection:
+              Boolean(
+                parsed?.hasCorrection
+              ),
 
-          correctedText:
-            parsed.correctedText,
+            originalText:
+              parsed?.originalText ||
+              '',
 
-          explanation:
-            parsed.explanation ||
-            '',
+            correctedText:
+              parsed?.correctedText ||
+              '',
 
-          pronunciationScore:
-            parsed.pronunciationScore ??
-            null,
-        });
-      }
+            explanation:
+              parsed?.explanation ||
+              '',
 
-      // --------------------------------------------------------
-      // SPEAK AI RESPONSE
-      // --------------------------------------------------------
+            pronunciationScore:
+              parsed?.pronunciationScore ??
+              null,
 
-      scheduleSpeech(
-        tutorMessage,
-        300
-      );
+            tip:
+              parsed?.tip ||
+              '',
 
-    } catch (error) {
-      console.log(
-        '❌ Tutor request error:',
-        error?.message || error
-      );
+            roleplayContext:
+              parsed?.roleplayContext ||
+              selectedScenario,
 
-      // Remove failed user message from history.
-      if (
-        conversationHistoryRef.current
-          .length > 0
-      ) {
-        const last =
-          conversationHistoryRef.current[
-            conversationHistoryRef.current.length - 1
+            objective:
+              parsed?.objective ||
+              scenario.objective,
+
+            stage:
+              parsed?.stage ||
+              '',
+          },
+        };
+
+        conversationHistoryRef.current =
+          [
+            ...conversationHistoryRef.current,
+
+            {
+              role:
+                'assistant',
+
+              content:
+                reply,
+            },
           ];
 
+        setMessages(
+          (
+            previous
+          ) => [
+            ...previous,
+            tutorMessage,
+          ]
+        );
+
         if (
-          last?.role === 'user' &&
-          last?.content ===
-            messageText
+          parsed?.hasCorrection &&
+          parsed?.correctedText
         ) {
-          conversationHistoryRef.current.pop();
+          await logGrammarCorrection({
+            originalText:
+              parsed.originalText ||
+              messageText,
+
+            correctedText:
+              parsed.correctedText,
+
+            explanation:
+              parsed.explanation ||
+              '',
+
+            pronunciationScore:
+              parsed?.pronunciationScore ??
+              null,
+          });
+        }
+
+        scheduleSpeech(
+          tutorMessage,
+          300
+        );
+
+      } catch (
+        error
+      ) {
+        console.log(
+          '❌ Tutor request error:',
+          error?.message ||
+            error
+        );
+
+        if (
+          conversationHistoryRef.current
+            .length > 0
+        ) {
+          const last =
+            conversationHistoryRef.current[
+              conversationHistoryRef.current.length -
+                1
+            ];
+
+          if (
+            last?.role ===
+              'user' &&
+            last?.content ===
+              messageText
+          ) {
+            conversationHistoryRef.current.pop();
+          }
+        }
+
+        const errorMessage = {
+          id:
+            `error-${Date.now()}`,
+
+          role:
+            'assistant',
+
+          type:
+            'tutor',
+
+          text:
+            'I could not connect to the AI tutor right now. Please try again.',
+
+          data: {
+            reply:
+              'I could not connect to the AI tutor right now. Please try again.',
+          },
+
+          isError:
+            true,
+        };
+
+        setMessages(
+          (
+            previous
+          ) => [
+            ...previous,
+            errorMessage,
+          ]
+        );
+
+      } finally {
+        sendingRef.current =
+          false;
+
+        if (
+          mountedRef.current
+        ) {
+          setLoading(
+            false
+          );
         }
       }
-
-      const errorMessage = {
-        id:
-          `error-${Date.now()}`,
-
-        role: 'assistant',
-
-        type: 'tutor',
-
-        text:
-          'I could not connect to the AI tutor right now. Please try again.',
-
-        data: {
-          reply:
-            'I could not connect to the AI tutor right now. Please try again.',
-        },
-
-        isError: true,
-      };
-
-      setMessages(
-        (previous) => [
-          ...previous,
-          errorMessage,
-        ]
-      );
-
-    } finally {
-      sendingRef.current = false;
-
-      if (mountedRef.current) {
-        setLoading(false);
-      }
-    }
-  };
+    };
 
 
   // ============================================================
   // GRAMMAR HISTORY
   // ============================================================
 
-  const logGrammarCorrection = async ({
-    originalText,
-    correctedText,
-    explanation,
-    pronunciationScore,
-  }) => {
-    if (!userIdRef.current) {
-      return;
-    }
+  const logGrammarCorrection =
+    async ({
+      originalText,
+      correctedText,
+      explanation,
+      pronunciationScore,
+    }) => {
+      if (
+        !userIdRef.current
+      ) {
+        return;
+      }
 
-    try {
-      await supabase
-        .from('grammar_history')
-        .insert({
-          user_id:
-            userIdRef.current,
+      try {
+        await supabase
+          .from(
+            'grammar_history'
+          )
+          .insert({
+            user_id:
+              userIdRef.current,
 
-          original_text:
-            originalText,
+            original_text:
+              originalText,
 
-          corrected_text:
-            correctedText,
+            corrected_text:
+              correctedText,
 
-          explanation:
-            explanation,
+            explanation:
+              explanation,
 
-          pronunciation_score:
-            pronunciationScore,
-        });
-    } catch (error) {
-      console.log(
-        'Grammar history error:',
-        error?.message || error
-      );
-    }
-  };
+            pronunciation_score:
+              pronunciationScore,
+          });
+
+      } catch (
+        error
+      ) {
+        console.log(
+          'Grammar history error:',
+          error?.message ||
+            error
+        );
+      }
+    };
 
 
   // ============================================================
   // RENDER CHAT MESSAGE
   // ============================================================
 
-  const renderMessage = ({
-    item,
-  }) => {
-    const isUser =
-      item.role === 'user';
+  const renderMessage =
+    ({
+      item,
+    }) => {
+      const isUser =
+        item.role ===
+        'user';
 
-    const isTutor =
-      item.role === 'assistant';
+      const isTutor =
+        item.role ===
+        'assistant';
 
-    return (
-      <View
-        style={[
-          styles.messageRow,
-
-          isUser
-            ? styles.userRow
-            : styles.tutorRow,
-        ]}
-      >
-        {!isUser && (
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              🤖
-            </Text>
-          </View>
-        )}
-
+      return (
         <View
           style={[
-            styles.messageBubble,
+            styles.messageRow,
 
             isUser
-              ? styles.userBubble
-              : styles.tutorBubble,
+              ? styles.userRow
+              : styles.tutorRow,
           ]}
         >
-          <Text
-            style={[
-              styles.messageText,
-
-              isUser
-                ? styles.userMessageText
-                : styles.tutorMessageText,
-            ]}
-          >
-            {item.text}
-          </Text>
-
-          {isTutor &&
-            !item.isError && (
-              <View
+          {!isUser && (
+            <View
+              style={
+                styles.avatar
+              }
+            >
+              <Text
                 style={
-                  styles.messageActions
+                  styles.avatarText
                 }
               >
-                <TouchableOpacity
+                🤖
+              </Text>
+            </View>
+          )}
+
+          <View
+            style={[
+              styles.messageBubble,
+
+              isUser
+                ? styles.userBubble
+                : styles.tutorBubble,
+            ]}
+          >
+            <Text
+              style={[
+                styles.messageText,
+
+                isUser
+                  ? styles.userMessageText
+                  : styles.tutorMessageText,
+              ]}
+            >
+              {item.text}
+            </Text>
+
+            {isTutor &&
+              !item.isError && (
+                <View
                   style={
-                    styles.audioButton
-                  }
-                  onPress={() =>
-                    handlePlayPauseAudio(
-                      item
-                    )
+                    styles.messageActions
                   }
                 >
-                  <Text
+                  <TouchableOpacity
                     style={
-                      styles.audioButtonText
+                      styles.audioButton
+                    }
+                    onPress={() =>
+                      handlePlayPauseAudio(
+                        item
+                      )
                     }
                   >
-                    {speakingId ===
-                      item.id &&
-                    isPlaying
-                      ? '⏸️'
-                      : '🔊'}
-                  </Text>
-                </TouchableOpacity>
-
-                {item.data
-                  ?.hasCorrection &&
-                  item.data
-                    ?.correctedText && (
-                    <View
-                      style={
-                        styles.correctionBox
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.correctionTitle
-                        }
-                      >
-                        ✏️ Correction
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.originalText
-                        }
-                      >
-                        You said:{' '}
-                        {
-                          item.data
-                            .originalText
-                        }
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.correctedText
-                        }
-                      >
-                        Better:{' '}
-                        {
-                          item.data
-                            .correctedText
-                        }
-                      </Text>
-
-                      {item.data
-                        .explanation ? (
-                        <Text
-                          style={
-                            styles.explanationText
-                          }
-                        >
-                          {
-                            item.data
-                              .explanation
-                          }
-                        </Text>
-                      ) : null}
-                    </View>
-                  )}
-
-                {item.data
-                  ?.pronunciationScore !==
-                  null &&
-                  item.data
-                    ?.pronunciationScore !==
-                    undefined && (
                     <Text
                       style={
-                        styles.scoreText
+                        styles.audioButtonText
                       }
                     >
-                      🎯 Pronunciation:{' '}
-                      {
-                        item.data
-                          .pronunciationScore
-                      }
-                      %
+                      {speakingId ===
+                        item.id &&
+                      isPlaying
+                        ? '⏸️'
+                        : '🔊'}
                     </Text>
-                  )}
+                  </TouchableOpacity>
 
-                {item.data?.tip ? (
-                  <Text
-                    style={
-                      styles.tipText
-                    }
-                  >
-                    💡 {item.data.tip}
-                  </Text>
-                ) : null}
-              </View>
-            )}
+                  {item.data
+                    ?.hasCorrection &&
+                    item.data
+                      ?.correctedText && (
+                      <View
+                        style={
+                          styles.correctionBox
+                        }
+                      >
+                        <Text
+                          style={
+                            styles.correctionTitle
+                          }
+                        >
+                          ✏️ Correction
+                        </Text>
+
+                        <Text
+                          style={
+                            styles.originalText
+                          }
+                        >
+                          You said:{' '}
+                          {
+                            item.data
+                              .originalText
+                          }
+                        </Text>
+
+                        <Text
+                          style={
+                            styles.correctedText
+                          }
+                        >
+                          Better:{' '}
+                          {
+                            item.data
+                              .correctedText
+                          }
+                        </Text>
+
+                        {item.data
+                          .explanation ? (
+                          <Text
+                            style={
+                              styles.explanationText
+                            }
+                          >
+                            {
+                              item.data
+                                .explanation
+                            }
+                          </Text>
+                        ) : null}
+                      </View>
+                    )}
+
+                  {item.data
+                    ?.pronunciationScore !==
+                    null &&
+                    item.data
+                      ?.pronunciationScore !==
+                      undefined && (
+                      <Text
+                        style={
+                          styles.scoreText
+                        }
+                      >
+                        🎯 Pronunciation:{' '}
+                        {
+                          item.data
+                            .pronunciationScore
+                        }
+                        %
+                      </Text>
+                    )}
+
+                  {item.data?.tip ? (
+                    <Text
+                      style={
+                        styles.tipText
+                      }
+                    >
+                      💡 {item.data.tip}
+                    </Text>
+                  ) : null}
+                </View>
+              )}
+          </View>
         </View>
-      </View>
-    );
-  };
+      );
+    };
 
 
   // ============================================================
   // VOICE MODAL
   // ============================================================
 
-  const renderVoiceModal = () => {
-    return (
-      <Modal
-        visible={
-          showVoiceModal
-        }
-        transparent
-        animationType="slide"
-        onRequestClose={() =>
-          setShowVoiceModal(false)
-        }
-      >
-        <View
-          style={
-            styles.modalOverlay
+  const renderVoiceModal =
+    () => {
+      return (
+        <Modal
+          visible={
+            showVoiceModal
+          }
+          transparent
+          animationType="slide"
+          onRequestClose={() =>
+            setShowVoiceModal(
+              false
+            )
           }
         >
           <View
             style={
-              styles.voiceModal
+              styles.modalOverlay
             }
           >
             <View
               style={
-                styles.modalHeader
+                styles.voiceModal
               }
             >
-              <Text
+              <View
                 style={
-                  styles.modalTitle
-                }
-              >
-                Select Tutor Voice
-              </Text>
-
-              <TouchableOpacity
-                onPress={() =>
-                  setShowVoiceModal(
-                    false
-                  )
+                  styles.modalHeader
                 }
               >
                 <Text
                   style={
-                    styles.closeButton
+                    styles.modalTitle
                   }
                 >
-                  ✕
+                  Select Tutor Voice
                 </Text>
-              </TouchableOpacity>
-            </View>
 
-            <ScrollView
-              style={
-                styles.voiceList
-              }
-            >
-              {availableVoices.length ===
-              0 ? (
-                <View
-                  style={
-                    styles.emptyVoiceBox
+                <TouchableOpacity
+                  onPress={() =>
+                    setShowVoiceModal(
+                      false
+                    )
                   }
                 >
                   <Text
                     style={
-                      styles.emptyVoiceText
+                      styles.closeButton
                     }
                   >
-                    No device voices found.
+                    ✕
                   </Text>
-                </View>
-              ) : (
-                availableVoices.map(
-                  (
-                    voice,
-                    index
-                  ) => (
-                    <TouchableOpacity
-                      key={
-                        voice.identifier ||
-                        `${voice.name}-${index}`
-                      }
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                style={
+                  styles.voiceList
+                }
+              >
+                {availableVoices.length ===
+                0 ? (
+                  <View
+                    style={
+                      styles.emptyVoiceBox
+                    }
+                  >
+                    <Text
                       style={
-                        styles.voiceItem
+                        styles.emptyVoiceText
                       }
-                      onPress={() => {
-                        updatePreferredVoice(
-                          voice
-                        );
-
-                        setShowVoiceModal(
-                          false
-                        );
-                      }}
                     >
-                      <Text
-                        style={
-                          styles.voiceName
+                      No device voices found.
+                    </Text>
+                  </View>
+                ) : (
+                  availableVoices.map(
+                    (
+                      voice,
+                      index
+                    ) => (
+                      <TouchableOpacity
+                        key={
+                          voice.identifier ||
+                          `${voice.name}-${index}`
                         }
-                      >
-                        {voice.name ||
-                          'Voice'}
-                      </Text>
+                        style={
+                          styles.voiceItem
+                        }
+                        onPress={() => {
+                          updatePreferredVoice(
+                            voice
+                          );
 
-                      <Text
-                        style={
-                          styles.voiceLanguage
-                        }
+                          setShowVoiceModal(
+                            false
+                          );
+                        }}
                       >
-                        {voice.language ||
-                          'Unknown language'}
-                      </Text>
-                    </TouchableOpacity>
+                        <Text
+                          style={
+                            styles.voiceName
+                          }
+                        >
+                          {voice.name ||
+                            'Voice'}
+                        </Text>
+
+                        <Text
+                          style={
+                            styles.voiceLanguage
+                          }
+                        >
+                          {voice.language ||
+                            'Unknown language'}
+                        </Text>
+                      </TouchableOpacity>
+                    )
                   )
-                )
-              )}
-            </ScrollView>
+                )}
+              </ScrollView>
+            </View>
           </View>
-        </View>
-      </Modal>
-    );
-  };
+        </Modal>
+      );
+    };
 
 
   // ============================================================
@@ -2452,7 +3730,8 @@ export default function TutorChatScreen({
     ROLEPLAY_SCENARIOS[
       selectedScenario
     ] ||
-    ROLEPLAY_SCENARIOS.introduction;
+    ROLEPLAY_SCENARIOS
+      .introduction;
 
 
   // ============================================================
@@ -2461,9 +3740,12 @@ export default function TutorChatScreen({
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={
+        styles.container
+      }
       behavior={
-        Platform.OS === 'ios'
+        Platform.OS ===
+        'ios'
           ? 'padding'
           : undefined
       }
@@ -2472,9 +3754,15 @@ export default function TutorChatScreen({
       {/* HEADER */}
       {/* ================================================== */}
 
-      <View style={styles.header}>
+      <View
+        style={
+          styles.header
+        }
+      >
         <TouchableOpacity
-          style={styles.backButton}
+          style={
+            styles.backButton
+          }
           onPress={() => {
             stopLiveSession();
             onBack?.();
@@ -2517,7 +3805,9 @@ export default function TutorChatScreen({
             styles.voiceSettingsButton
           }
           onPress={() =>
-            setShowVoiceModal(true)
+            setShowVoiceModal(
+              true
+            )
           }
         >
           <Text
@@ -2601,7 +3891,7 @@ export default function TutorChatScreen({
             : listening
               ? 'Listening...'
               : isSessionActive
-                ? 'Preparing microphone...'
+                ? 'Tap microphone to listen'
                 : 'Tap microphone to start'}
         </Text>
 
@@ -2612,6 +3902,73 @@ export default function TutorChatScreen({
             }
           >
             {voiceError}
+          </Text>
+        ) : null}
+      </View>
+
+
+      {/* ================================================== */}
+      {/* RAW MICROPHONE DIAGNOSTIC */}
+      {/* ================================================== */}
+
+      <View
+        style={
+          styles.diagnosticContainer
+        }
+      >
+        <TouchableOpacity
+          style={[
+            styles.diagnosticButton,
+
+            micDiagnosticRunning &&
+              styles.diagnosticButtonActive,
+          ]}
+          disabled={
+            micDiagnosticRunning
+          }
+          onPress={
+            runMicrophoneDiagnostic
+          }
+        >
+          <Text
+            style={
+              styles.diagnosticButtonText
+            }
+          >
+            {micDiagnosticRunning
+              ? '🎤 Testing microphone...'
+              : '🔎 Test microphone'}
+          </Text>
+        </TouchableOpacity>
+
+        {micDiagnosticStatus ? (
+          <Text
+            style={
+              styles.diagnosticStatus
+            }
+          >
+            {micDiagnosticStatus}
+          </Text>
+        ) : null}
+
+        {micInputName ? (
+          <Text
+            style={
+              styles.diagnosticDetail
+            }
+          >
+            Input: {micInputName}
+          </Text>
+        ) : null}
+
+        {typeof micMetering ===
+        'number' ? (
+          <Text
+            style={
+              styles.diagnosticDetail
+            }
+          >
+            Audio level: {micMetering}
           </Text>
         ) : null}
       </View>
@@ -2687,7 +4044,9 @@ export default function TutorChatScreen({
             scenario,
           ]) => (
             <TouchableOpacity
-              key={key}
+              key={
+                key
+              }
               style={[
                 styles.scenarioCard,
 
@@ -2706,7 +4065,9 @@ export default function TutorChatScreen({
                   styles.scenarioIcon
                 }
               >
-                {scenario.icon}
+                {
+                  scenario.icon
+                }
               </Text>
 
               <Text
@@ -2718,7 +4079,9 @@ export default function TutorChatScreen({
                     styles.scenarioTitleActive,
                 ]}
               >
-                {scenario.title}
+                {
+                  scenario.title
+                }
               </Text>
             </TouchableOpacity>
           )
@@ -2731,11 +4094,21 @@ export default function TutorChatScreen({
       {/* ================================================== */}
 
       <FlatList
-        ref={flatListRef}
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item) =>
-          String(item.id)
+        ref={
+          flatListRef
+        }
+        data={
+          messages
+        }
+        renderItem={
+          renderMessage
+        }
+        keyExtractor={(
+          item
+        ) =>
+          String(
+            item.id
+          )
         }
         style={
           styles.chatList
@@ -2810,7 +4183,9 @@ export default function TutorChatScreen({
               styles.interimText
             }
           >
-            {interimTranscript}
+            {
+              interimTranscript
+            }
           </Text>
         </View>
       ) : null}
@@ -2830,14 +4205,31 @@ export default function TutorChatScreen({
             styles.micButton,
 
             isSessionActive &&
+              listening &&
               styles.micButtonActive,
           ]}
           onPress={() => {
-            if (isSessionActive) {
-              stopLiveSession();
-            } else {
-              startLiveSession();
+            if (
+              micDiagnosticRunning
+            ) {
+              return;
             }
+
+            if (
+              !isSessionActive
+            ) {
+              startLiveSession();
+              return;
+            }
+
+            if (
+              listening
+            ) {
+              stopLiveSession();
+              return;
+            }
+
+            retryListening();
           }}
         >
           <Text
@@ -2845,9 +4237,11 @@ export default function TutorChatScreen({
               styles.micIcon
             }
           >
-            {isSessionActive
-              ? '⏹'
-              : '🎙️'}
+            {!isSessionActive
+              ? '🎙️'
+              : listening
+                ? '⏹'
+                : '🎙️'}
           </Text>
         </TouchableOpacity>
 
@@ -2855,7 +4249,9 @@ export default function TutorChatScreen({
           style={
             styles.textInput
           }
-          value={input}
+          value={
+            input
+          }
           onChangeText={
             setInput
           }
@@ -2866,9 +4262,13 @@ export default function TutorChatScreen({
           }
           placeholderTextColor="#7d8494"
           multiline
-          editable={!loading}
+          editable={
+            !loading
+          }
           onSubmitEditing={() => {
-            if (!loading) {
+            if (
+              !loading
+            ) {
               handleSend();
             }
           }}
@@ -2915,574 +4315,774 @@ export default function TutorChatScreen({
 // STYLES
 // ============================================================
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0b1020',
-  },
-
-  // ----------------------------------------------------------
-  // HEADER
-  // ----------------------------------------------------------
-
-  header: {
-    height: 70,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#20283a',
-    backgroundColor: '#10172a',
-  },
-
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1a2235',
-  },
-
-  backButtonText: {
-    color: '#ffffff',
-    fontSize: 34,
-    lineHeight: 36,
-    marginTop: -4,
-  },
-
-  headerCenter: {
-    flex: 1,
-    paddingHorizontal: 12,
-  },
-
-  headerTitle: {
-    color: '#ffffff',
-    fontSize: 19,
-    fontWeight: '700',
-  },
-
-  headerSubtitle: {
-    color: '#8e98ac',
-    fontSize: 12,
-    marginTop: 2,
-  },
-
-  voiceSettingsButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1a2235',
-  },
-
-  voiceSettingsText: {
-    fontSize: 20,
-  },
-
-
-  // ----------------------------------------------------------
-  // DAY BANNER
-  // ----------------------------------------------------------
-
-  dayBanner: {
-    marginHorizontal: 14,
-    marginTop: 12,
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: '#151d31',
-    borderWidth: 1,
-    borderColor: '#27314a',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  dayBannerTitle: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-
-  dayBannerSubtitle: {
-    color: '#98a3b8',
-    fontSize: 12,
-    marginTop: 5,
-    maxWidth: 290,
-    lineHeight: 17,
-  },
-
-  dayEmoji: {
-    marginLeft: 'auto',
-    fontSize: 30,
-  },
-
-
-  // ----------------------------------------------------------
-  // VOICE STATUS
-  // ----------------------------------------------------------
-
-  voiceStatusContainer: {
-    minHeight: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#596273',
-    marginBottom: 3,
-  },
-
-  statusDotActive: {
-    backgroundColor: '#35d07f',
-  },
-
-  statusDotSpeaking: {
-    backgroundColor: '#8b7cff',
-  },
-
-  voiceStatusText: {
-    color: '#a9b2c3',
-    fontSize: 12,
-  },
-
-  voiceErrorText: {
-    color: '#ff8c8c',
-    fontSize: 11,
-    marginTop: 3,
-    textAlign: 'center',
-  },
-
-
-  // ----------------------------------------------------------
-  // WAVE
-  // ----------------------------------------------------------
-
-  waveContainer: {
-    height: 35,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 5,
-  },
-
-  waveBar: {
-    width: 5,
-    height: 10,
-    borderRadius: 3,
-    backgroundColor: '#5d75ff',
-  },
-
-  waveBarTall: {
-    height: 24,
-  },
-
-  waveBarTall2: {
-    height: 18,
-  },
-
-
-  // ----------------------------------------------------------
-  // SCENARIOS
-  // ----------------------------------------------------------
-
-  scenarioScroll: {
-    maxHeight: 78,
-    flexGrow: 0,
-  },
-
-  scenarioContent: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    gap: 8,
-  },
-
-  scenarioCard: {
-    minWidth: 88,
-    height: 62,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    backgroundColor: '#151d31',
-    borderWidth: 1,
-    borderColor: '#242e44',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  scenarioCardActive: {
-    borderColor: '#6578ff',
-    backgroundColor: '#1b2443',
-  },
-
-  scenarioIcon: {
-    fontSize: 20,
-  },
-
-  scenarioTitle: {
-    color: '#8f9aae',
-    fontSize: 10,
-    fontWeight: '600',
-    marginTop: 3,
-  },
-
-  scenarioTitleActive: {
-    color: '#ffffff',
-  },
-
-
-  // ----------------------------------------------------------
-  // CHAT
-  // ----------------------------------------------------------
-
-  chatList: {
-    flex: 1,
-  },
-
-  chatContent: {
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 12,
-  },
-
-  messageRow: {
-    flexDirection: 'row',
-    marginBottom: 14,
-    alignItems: 'flex-end',
-  },
-
-  userRow: {
-    justifyContent: 'flex-end',
-  },
-
-  tutorRow: {
-    justifyContent: 'flex-start',
-  },
-
-  avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#202b46',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-
-  avatarText: {
-    fontSize: 18,
-  },
-
-  messageBubble: {
-    maxWidth: '82%',
-    borderRadius: 17,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-  },
-
-  userBubble: {
-    backgroundColor: '#5368ed',
-    borderBottomRightRadius: 4,
-  },
-
-  tutorBubble: {
-    backgroundColor: '#171f32',
-    borderWidth: 1,
-    borderColor: '#28334b',
-    borderBottomLeftRadius: 4,
-  },
-
-  messageText: {
-    fontSize: 15,
-    lineHeight: 22,
-  },
-
-  userMessageText: {
-    color: '#ffffff',
-  },
-
-  tutorMessageText: {
-    color: '#e6eaf2',
-  },
-
-  messageActions: {
-    marginTop: 8,
-  },
-
-  audioButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#232d46',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  audioButtonText: {
-    fontSize: 15,
-  },
-
-
-  // ----------------------------------------------------------
-  // CORRECTION
-  // ----------------------------------------------------------
-
-  correctionBox: {
-    marginTop: 9,
-    padding: 10,
-    borderRadius: 10,
-    backgroundColor: '#101729',
-    borderLeftWidth: 3,
-    borderLeftColor: '#6678ff',
-  },
-
-  correctionTitle: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 5,
-  },
-
-  originalText: {
-    color: '#ff9b9b',
-    fontSize: 12,
-    lineHeight: 17,
-  },
-
-  correctedText: {
-    color: '#6fe3a2',
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 3,
-  },
-
-  explanationText: {
-    color: '#9ba6b9',
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 5,
-  },
-
-  scoreText: {
-    color: '#f4c96b',
-    fontSize: 11,
-    marginTop: 7,
-  },
-
-  tipText: {
-    color: '#91b6ff',
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 5,
-  },
-
-
-  // ----------------------------------------------------------
-  // TYPING
-  // ----------------------------------------------------------
-
-  typingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-
-  typingAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#202b46',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-
-  typingBubble: {
-    backgroundColor: '#171f32',
-    borderRadius: 16,
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  typingText: {
-    color: '#8f9aae',
-    fontSize: 11,
-    marginLeft: 8,
-  },
-
-
-  // ----------------------------------------------------------
-  // INTERIM SPEECH
-  // ----------------------------------------------------------
-
-  interimContainer: {
-    marginHorizontal: 14,
-    marginBottom: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 10,
-    backgroundColor: '#121a2d',
-    borderWidth: 1,
-    borderColor: '#27324a',
-  },
-
-  interimLabel: {
-    color: '#69778f',
-    fontSize: 10,
-    marginBottom: 2,
-  },
-
-  interimText: {
-    color: '#d8deea',
-    fontSize: 13,
-  },
-
-
-  // ----------------------------------------------------------
-  // INPUT
-  // ----------------------------------------------------------
-
-  inputContainer: {
-    minHeight: 68,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    backgroundColor: '#10172a',
-    borderTopWidth: 1,
-    borderTopColor: '#20283a',
-    gap: 8,
-  },
-
-  micButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#202b46',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  micButtonActive: {
-    backgroundColor: '#c54858',
-  },
-
-  micIcon: {
-    fontSize: 21,
-  },
-
-  textInput: {
-    flex: 1,
-    minHeight: 46,
-    maxHeight: 110,
-    borderRadius: 23,
-    backgroundColor: '#171f32',
-    borderWidth: 1,
-    borderColor: '#29344c',
-    color: '#ffffff',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 10,
-    fontSize: 14,
-  },
-
-  sendButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: '#586cf0',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  sendButtonDisabled: {
-    opacity: 0.35,
-  },
-
-  sendButtonText: {
-    color: '#ffffff',
-    fontSize: 22,
-    marginLeft: 2,
-  },
-
-
-  // ----------------------------------------------------------
-  // MODAL
-  // ----------------------------------------------------------
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.72)',
-    justifyContent: 'flex-end',
-  },
-
-  voiceModal: {
-    backgroundColor: '#11182a',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '75%',
-    paddingBottom: 25,
-  },
-
-  modalHeader: {
-    height: 64,
-    paddingHorizontal: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#263149',
-  },
-
-  modalTitle: {
-    flex: 1,
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-
-  closeButton: {
-    color: '#ffffff',
-    fontSize: 22,
-  },
-
-  voiceList: {
-    paddingHorizontal: 15,
-    paddingTop: 10,
-  },
-
-  voiceItem: {
-    padding: 14,
-    borderRadius: 12,
-    backgroundColor: '#182137',
-    borderWidth: 1,
-    borderColor: '#27334c',
-    marginBottom: 8,
-  },
-
-  voiceName: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
-  voiceLanguage: {
-    color: '#8995aa',
-    fontSize: 11,
-    marginTop: 3,
-  },
-
-  emptyVoiceBox: {
-    padding: 30,
-    alignItems: 'center',
-  },
-
-  emptyVoiceText: {
-    color: '#8c97aa',
-    fontSize: 13,
-  },
-});
+const styles =
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor:
+        '#0b1020',
+    },
+
+    // --------------------------------------------------------
+    // HEADER
+    // --------------------------------------------------------
+
+    header: {
+      height: 70,
+      flexDirection:
+        'row',
+      alignItems:
+        'center',
+      paddingHorizontal:
+        16,
+      borderBottomWidth:
+        1,
+      borderBottomColor:
+        '#20283a',
+      backgroundColor:
+        '#10172a',
+    },
+
+    backButton: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      justifyContent:
+        'center',
+      alignItems:
+        'center',
+      backgroundColor:
+        '#1a2235',
+    },
+
+    backButtonText: {
+      color:
+        '#ffffff',
+      fontSize: 34,
+      lineHeight: 36,
+      marginTop: -4,
+    },
+
+    headerCenter: {
+      flex: 1,
+      paddingHorizontal:
+        12,
+    },
+
+    headerTitle: {
+      color:
+        '#ffffff',
+      fontSize: 19,
+      fontWeight:
+        '700',
+    },
+
+    headerSubtitle: {
+      color:
+        '#8e98ac',
+      fontSize: 12,
+      marginTop: 2,
+    },
+
+    voiceSettingsButton: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      justifyContent:
+        'center',
+      alignItems:
+        'center',
+      backgroundColor:
+        '#1a2235',
+    },
+
+    voiceSettingsText: {
+      fontSize: 20,
+    },
+
+    // --------------------------------------------------------
+    // DAY BANNER
+    // --------------------------------------------------------
+
+    dayBanner: {
+      marginHorizontal:
+        14,
+      marginTop: 12,
+      padding: 16,
+      borderRadius: 16,
+      backgroundColor:
+        '#151d31',
+      borderWidth: 1,
+      borderColor:
+        '#27314a',
+      flexDirection:
+        'row',
+      alignItems:
+        'center',
+    },
+
+    dayBannerTitle: {
+      color:
+        '#ffffff',
+      fontSize: 18,
+      fontWeight:
+        '800',
+    },
+
+    dayBannerSubtitle: {
+      color:
+        '#98a3b8',
+      fontSize: 12,
+      marginTop: 5,
+      maxWidth: 290,
+      lineHeight: 17,
+    },
+
+    dayEmoji: {
+      marginLeft:
+        'auto',
+      fontSize: 30,
+    },
+
+    // --------------------------------------------------------
+    // VOICE STATUS
+    // --------------------------------------------------------
+
+    voiceStatusContainer: {
+      minHeight: 32,
+      alignItems:
+        'center',
+      justifyContent:
+        'center',
+      paddingHorizontal:
+        12,
+    },
+
+    statusDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor:
+        '#596273',
+      marginBottom: 3,
+    },
+
+    statusDotActive: {
+      backgroundColor:
+        '#35d07f',
+    },
+
+    statusDotSpeaking: {
+      backgroundColor:
+        '#8b7cff',
+    },
+
+    voiceStatusText: {
+      color:
+        '#a9b2c3',
+      fontSize: 12,
+    },
+
+    voiceErrorText: {
+      color:
+        '#ff8c8c',
+      fontSize: 11,
+      marginTop: 3,
+      textAlign:
+        'center',
+    },
+
+    // --------------------------------------------------------
+    // RAW MICROPHONE DIAGNOSTIC
+    // --------------------------------------------------------
+
+    diagnosticContainer: {
+      marginHorizontal:
+        14,
+      marginBottom: 4,
+      paddingHorizontal:
+        10,
+      paddingVertical:
+        7,
+      borderRadius: 12,
+      backgroundColor:
+        '#10192c',
+      borderWidth: 1,
+      borderColor:
+        '#263553',
+    },
+
+    diagnosticButton: {
+      minHeight: 36,
+      borderRadius: 18,
+      backgroundColor:
+        '#202d4b',
+      justifyContent:
+        'center',
+      alignItems:
+        'center',
+      paddingHorizontal:
+        16,
+    },
+
+    diagnosticButtonActive: {
+      backgroundColor:
+        '#394b78',
+    },
+
+    diagnosticButtonText: {
+      color:
+        '#ffffff',
+      fontSize: 12,
+      fontWeight:
+        '700',
+    },
+
+    diagnosticStatus: {
+      color:
+        '#b8c5dc',
+      fontSize: 11,
+      lineHeight: 16,
+      textAlign:
+        'center',
+      marginTop: 5,
+    },
+
+    diagnosticDetail: {
+      color:
+        '#71819d',
+      fontSize: 10,
+      textAlign:
+        'center',
+      marginTop: 2,
+    },
+
+    // --------------------------------------------------------
+    // WAVE
+    // --------------------------------------------------------
+
+    waveContainer: {
+      height: 35,
+      flexDirection:
+        'row',
+      justifyContent:
+        'center',
+      alignItems:
+        'center',
+      gap: 5,
+    },
+
+    waveBar: {
+      width: 5,
+      height: 10,
+      borderRadius: 3,
+      backgroundColor:
+        '#5d75ff',
+    },
+
+    waveBarTall: {
+      height: 24,
+    },
+
+    waveBarTall2: {
+      height: 18,
+    },
+
+    // --------------------------------------------------------
+    // SCENARIOS
+    // --------------------------------------------------------
+
+    scenarioScroll: {
+      maxHeight: 78,
+      flexGrow: 0,
+    },
+
+    scenarioContent: {
+      paddingHorizontal:
+        14,
+      paddingVertical:
+        7,
+      gap: 8,
+    },
+
+    scenarioCard: {
+      minWidth: 88,
+      height: 62,
+      paddingHorizontal:
+        10,
+      borderRadius: 12,
+      backgroundColor:
+        '#151d31',
+      borderWidth: 1,
+      borderColor:
+        '#242e44',
+      alignItems:
+        'center',
+      justifyContent:
+        'center',
+    },
+
+    scenarioCardActive: {
+      borderColor:
+        '#6578ff',
+      backgroundColor:
+        '#1b2443',
+    },
+
+    scenarioIcon: {
+      fontSize: 20,
+    },
+
+    scenarioTitle: {
+      color:
+        '#8f9aae',
+      fontSize: 10,
+      fontWeight:
+        '600',
+      marginTop: 3,
+    },
+
+    scenarioTitleActive: {
+      color:
+        '#ffffff',
+    },
+
+    // --------------------------------------------------------
+    // CHAT
+    // --------------------------------------------------------
+
+    chatList: {
+      flex: 1,
+    },
+
+    chatContent: {
+      paddingHorizontal:
+        14,
+      paddingTop: 10,
+      paddingBottom: 12,
+    },
+
+    messageRow: {
+      flexDirection:
+        'row',
+      marginBottom: 14,
+      alignItems:
+        'flex-end',
+    },
+
+    userRow: {
+      justifyContent:
+        'flex-end',
+    },
+
+    tutorRow: {
+      justifyContent:
+        'flex-start',
+    },
+
+    avatar: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      backgroundColor:
+        '#202b46',
+      alignItems:
+        'center',
+      justifyContent:
+        'center',
+      marginRight: 8,
+    },
+
+    avatarText: {
+      fontSize: 18,
+    },
+
+    messageBubble: {
+      maxWidth:
+        '82%',
+      borderRadius:
+        17,
+      paddingHorizontal:
+        14,
+      paddingVertical:
+        11,
+    },
+
+    userBubble: {
+      backgroundColor:
+        '#5368ed',
+      borderBottomRightRadius:
+        4,
+    },
+
+    tutorBubble: {
+      backgroundColor:
+        '#171f32',
+      borderWidth: 1,
+      borderColor:
+        '#28334b',
+      borderBottomLeftRadius:
+        4,
+    },
+
+    messageText: {
+      fontSize: 15,
+      lineHeight: 22,
+    },
+
+    userMessageText: {
+      color:
+        '#ffffff',
+    },
+
+    tutorMessageText: {
+      color:
+        '#e6eaf2',
+    },
+
+    messageActions: {
+      marginTop: 8,
+    },
+
+    audioButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      backgroundColor:
+        '#232d46',
+      alignItems:
+        'center',
+      justifyContent:
+        'center',
+    },
+
+    audioButtonText: {
+      fontSize: 15,
+    },
+
+    // --------------------------------------------------------
+    // CORRECTION
+    // --------------------------------------------------------
+
+    correctionBox: {
+      marginTop: 9,
+      padding: 10,
+      borderRadius: 10,
+      backgroundColor:
+        '#101729',
+      borderLeftWidth:
+        3,
+      borderLeftColor:
+        '#6678ff',
+    },
+
+    correctionTitle: {
+      color:
+        '#ffffff',
+      fontSize: 12,
+      fontWeight:
+        '700',
+      marginBottom: 5,
+    },
+
+    originalText: {
+      color:
+        '#ff9b9b',
+      fontSize: 12,
+      lineHeight: 17,
+    },
+
+    correctedText: {
+      color:
+        '#6fe3a2',
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 3,
+    },
+
+    explanationText: {
+      color:
+        '#9ba6b9',
+      fontSize: 11,
+      lineHeight: 16,
+      marginTop: 5,
+    },
+
+    scoreText: {
+      color:
+        '#f4c96b',
+      fontSize: 11,
+      marginTop: 7,
+    },
+
+    tipText: {
+      color:
+        '#91b6ff',
+      fontSize: 11,
+      lineHeight: 16,
+      marginTop: 5,
+    },
+
+    // --------------------------------------------------------
+    // TYPING
+    // --------------------------------------------------------
+
+    typingContainer: {
+      flexDirection:
+        'row',
+      alignItems:
+        'center',
+      marginBottom: 10,
+    },
+
+    typingAvatar: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      backgroundColor:
+        '#202b46',
+      justifyContent:
+        'center',
+      alignItems:
+        'center',
+      marginRight: 8,
+    },
+
+    typingBubble: {
+      backgroundColor:
+        '#171f32',
+      borderRadius: 16,
+      paddingHorizontal:
+        13,
+      paddingVertical:
+        9,
+      flexDirection:
+        'row',
+      alignItems:
+        'center',
+    },
+
+    typingText: {
+      color:
+        '#8f9aae',
+      fontSize: 11,
+      marginLeft: 8,
+    },
+
+    // --------------------------------------------------------
+    // INTERIM SPEECH
+    // --------------------------------------------------------
+
+    interimContainer: {
+      marginHorizontal:
+        14,
+      marginBottom: 5,
+      paddingHorizontal:
+        12,
+      paddingVertical:
+        7,
+      borderRadius: 10,
+      backgroundColor:
+        '#121a2d',
+      borderWidth: 1,
+      borderColor:
+        '#27324a',
+    },
+
+    interimLabel: {
+      color:
+        '#69778f',
+      fontSize: 10,
+      marginBottom: 2,
+    },
+
+    interimText: {
+      color:
+        '#d8deea',
+      fontSize: 13,
+    },
+
+    // --------------------------------------------------------
+    // INPUT
+    // --------------------------------------------------------
+
+    inputContainer: {
+      minHeight: 68,
+      flexDirection:
+        'row',
+      alignItems:
+        'center',
+      paddingHorizontal:
+        10,
+      paddingVertical:
+        9,
+      backgroundColor:
+        '#10172a',
+      borderTopWidth:
+        1,
+      borderTopColor:
+        '#20283a',
+      gap: 8,
+    },
+
+    micButton: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor:
+        '#202b46',
+      justifyContent:
+        'center',
+      alignItems:
+        'center',
+    },
+
+    micButtonActive: {
+      backgroundColor:
+        '#c54858',
+    },
+
+    micIcon: {
+      fontSize: 21,
+    },
+
+    textInput: {
+      flex: 1,
+      minHeight: 46,
+      maxHeight: 110,
+      borderRadius: 23,
+      backgroundColor:
+        '#171f32',
+      borderWidth: 1,
+      borderColor:
+        '#29344c',
+      color:
+        '#ffffff',
+      paddingHorizontal:
+        16,
+      paddingTop: 12,
+      paddingBottom: 10,
+      fontSize: 14,
+    },
+
+    sendButton: {
+      width: 46,
+      height: 46,
+      borderRadius: 23,
+      backgroundColor:
+        '#586cf0',
+      justifyContent:
+        'center',
+      alignItems:
+        'center',
+    },
+
+    sendButtonDisabled: {
+      opacity: 0.35,
+    },
+
+    sendButtonText: {
+      color:
+        '#ffffff',
+      fontSize: 22,
+      marginLeft: 2,
+    },
+
+    // --------------------------------------------------------
+    // MODAL
+    // --------------------------------------------------------
+
+    modalOverlay: {
+      flex: 1,
+      backgroundColor:
+        'rgba(0,0,0,0.72)',
+      justifyContent:
+        'flex-end',
+    },
+
+    voiceModal: {
+      backgroundColor:
+        '#11182a',
+      borderTopLeftRadius:
+        24,
+      borderTopRightRadius:
+        24,
+      maxHeight:
+        '75%',
+      paddingBottom:
+        25,
+    },
+
+    modalHeader: {
+      height: 64,
+      paddingHorizontal:
+        18,
+      flexDirection:
+        'row',
+      alignItems:
+        'center',
+      borderBottomWidth:
+        1,
+      borderBottomColor:
+        '#263149',
+    },
+
+    modalTitle: {
+      flex: 1,
+      color:
+        '#ffffff',
+      fontSize: 18,
+      fontWeight:
+        '700',
+    },
+
+    closeButton: {
+      color:
+        '#ffffff',
+      fontSize: 22,
+    },
+
+    voiceList: {
+      paddingHorizontal:
+        15,
+      paddingTop: 10,
+    },
+
+    voiceItem: {
+      padding: 14,
+      borderRadius: 12,
+      backgroundColor:
+        '#182137',
+      borderWidth: 1,
+      borderColor:
+        '#27334c',
+      marginBottom: 8,
+    },
+
+    voiceName: {
+      color:
+        '#ffffff',
+      fontSize: 14,
+      fontWeight:
+        '600',
+    },
+
+    voiceLanguage: {
+      color:
+        '#8995aa',
+      fontSize: 11,
+      marginTop: 3,
+    },
+
+    emptyVoiceBox: {
+      padding: 30,
+      alignItems:
+        'center',
+    },
+
+    emptyVoiceText: {
+      color:
+        '#8c97aa',
+      fontSize: 13,
+    },
+  });
