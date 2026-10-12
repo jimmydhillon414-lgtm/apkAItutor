@@ -253,6 +253,10 @@ export default function TutorChatScreen({
   const preferredVoiceRef =
     useRef(null);
 
+  // Keep the same selected device voice for each language during this session.
+  const voiceByLanguageRef =
+    useRef({});
+
 
   // ----------------------------------------------------------
   // RAW MICROPHONE DIAGNOSTIC REFS
@@ -1758,16 +1762,47 @@ export default function TutorChatScreen({
       }
 
       console.log(
-        '🎙️ Recognition ended without intentional stop. Waiting for user to start another turn.'
+        '🎙️ Recognition ended unexpectedly. Scheduling safe microphone restart.'
       );
 
+      // Android speech recognition commonly ends after one utterance or a
+      // no-speech timeout. In a live tutor session, recover automatically.
       if (
-        mountedRef.current
+        recognitionRetryTimeoutRef.current
       ) {
-        setVoiceError(
-          'No speech detected. Tap the microphone to try again.'
+        clearTimeout(
+          recognitionRetryTimeoutRef.current
         );
       }
+
+      recognitionRetryTimeoutRef.current =
+        setTimeout(
+          () => {
+            recognitionRetryTimeoutRef.current = null;
+
+            if (
+              !mountedRef.current ||
+              !sessionActiveRef.current ||
+              sendingRef.current ||
+              isSpeakingRef.current ||
+              micDiagnosticRunningRef.current ||
+              recognitionRunningRef.current ||
+              recognitionStartingRef.current
+            ) {
+              console.log(
+                '🎙️ Microphone restart skipped because the tutor is busy or the session is inactive.'
+              );
+              return;
+            }
+
+            intentionalRecognitionStopRef.current = false;
+            console.log(
+              '🎙️ Recovering live session: restarting speech recognition.'
+            );
+            startContinuousListening();
+          },
+          900
+        );
     }
   );
 
@@ -2162,49 +2197,95 @@ export default function TutorChatScreen({
         let selectedVoice =
           null;
 
+        const requestedLanguage =
+          String(speechLang || 'en-IN').toLowerCase();
+
+        const requestedBaseLanguage =
+          requestedLanguage.split('-')[0];
+
         const preferredVoice =
           message.preferredVoice ||
           preferredVoiceRef.current;
 
-        if (
-          preferredVoice
-        ) {
+        // A saved voice is usable only when it matches the active language.
+        // Otherwise Android can speak one language with another language's
+        // voice, which sounds inconsistent or triggers system fallback.
+        if (preferredVoice) {
           selectedVoice =
             availableVoices.find(
-              (
-                voice
-              ) =>
-                voice.identifier ===
-                  preferredVoice ||
-                voice.name ===
-                  preferredVoice
-            );
+              (voice) =>
+                (voice.identifier === preferredVoice ||
+                  voice.name === preferredVoice) &&
+                String(voice.language || '').toLowerCase() ===
+                  requestedLanguage
+            ) || null;
         }
 
         const languageVoices =
           availableVoices.filter(
-            (
-              voice
-            ) => {
-              if (
-                !voice?.language
-              ) {
-                return false;
-              }
-
-              return (
-                voice.language.toLowerCase() ===
-                speechLang.toLowerCase()
-              );
-            }
+            (voice) =>
+              String(voice?.language || '').toLowerCase() ===
+              requestedLanguage
           );
 
-        if (
-          !selectedVoice &&
+        const baseLanguageVoices =
+          availableVoices.filter(
+            (voice) =>
+              String(voice?.language || '').toLowerCase().split('-')[0] ===
+              requestedBaseLanguage
+          );
+
+        // Reuse the voice previously selected for this language.
+        if (!selectedVoice) {
+          const cachedVoiceId =
+            voiceByLanguageRef.current[requestedLanguage];
+
+          if (cachedVoiceId) {
+            selectedVoice =
+              availableVoices.find(
+                (voice) =>
+                  voice.identifier === cachedVoiceId ||
+                  voice.name === cachedVoiceId
+              ) || null;
+          }
+        }
+
+        // Prefer an exact locale, then the same base language. Use a
+        // deterministic quality/name ordering instead of voices[0], whose
+        // order can vary between Android voice-engine refreshes.
+        const rankedVoices = (
           languageVoices.length > 0
-        ) {
-          selectedVoice =
-            languageVoices[0];
+            ? languageVoices
+            : baseLanguageVoices
+        ).slice().sort((left, right) => {
+          const score = (voice) => {
+            const description =
+              `${voice?.name || ''} ${voice?.quality || ''}`.toLowerCase();
+
+            let value = 0;
+            if (description.includes('enhanced')) value += 30;
+            if (description.includes('premium')) value += 25;
+            if (description.includes('natural')) value += 20;
+            if (description.includes('neural')) value += 20;
+            if (description.includes('default')) value += 5;
+            return value;
+          };
+
+          const scoreDifference = score(right) - score(left);
+          if (scoreDifference !== 0) return scoreDifference;
+
+          return String(left?.identifier || left?.name || '').localeCompare(
+            String(right?.identifier || right?.name || '')
+          );
+        });
+
+        if (!selectedVoice && rankedVoices.length > 0) {
+          selectedVoice = rankedVoices[0];
+        }
+
+        if (selectedVoice) {
+          voiceByLanguageRef.current[requestedLanguage] =
+            selectedVoice.identifier || selectedVoice.name;
         }
 
         const speechOptions = {
@@ -4260,7 +4341,7 @@ export default function TutorChatScreen({
               ? 'Speak now...'
               : 'Type your message...'
           }
-          placeholderTextColor="#7d8494"
+          placeholderTextColor="#94A3B8"
           multiline
           editable={
             !loading
@@ -4320,7 +4401,7 @@ const styles =
     container: {
       flex: 1,
       backgroundColor:
-        '#0b1020',
+        '#0F1715',
     },
 
     // --------------------------------------------------------
@@ -4336,11 +4417,11 @@ const styles =
       paddingHorizontal:
         16,
       borderBottomWidth:
-        1,
+        1.5,
       borderBottomColor:
-        '#20283a',
+        '#116466',
       backgroundColor:
-        '#10172a',
+        '#111E1A',
     },
 
     backButton: {
@@ -4352,7 +4433,7 @@ const styles =
       alignItems:
         'center',
       backgroundColor:
-        '#1a2235',
+        '#116466',
     },
 
     backButtonText: {
@@ -4379,7 +4460,7 @@ const styles =
 
     headerSubtitle: {
       color:
-        '#8e98ac',
+        '#94A3B8',
       fontSize: 12,
       marginTop: 2,
     },
@@ -4393,7 +4474,7 @@ const styles =
       alignItems:
         'center',
       backgroundColor:
-        '#1a2235',
+        '#116466',
     },
 
     voiceSettingsText: {
@@ -4411,10 +4492,10 @@ const styles =
       padding: 16,
       borderRadius: 16,
       backgroundColor:
-        '#151d31',
+        '#182C25',
       borderWidth: 1,
       borderColor:
-        '#27314a',
+        '#116466',
       flexDirection:
         'row',
       alignItems:
@@ -4431,7 +4512,7 @@ const styles =
 
     dayBannerSubtitle: {
       color:
-        '#98a3b8',
+        '#94A3B8',
       fontSize: 12,
       marginTop: 5,
       maxWidth: 290,
@@ -4463,23 +4544,23 @@ const styles =
       height: 8,
       borderRadius: 4,
       backgroundColor:
-        '#596273',
+        '#64748B',
       marginBottom: 3,
     },
 
     statusDotActive: {
       backgroundColor:
-        '#35d07f',
+        '#4ADE80',
     },
 
     statusDotSpeaking: {
       backgroundColor:
-        '#8b7cff',
+        '#FFCB9A',
     },
 
     voiceStatusText: {
       color:
-        '#a9b2c3',
+        '#D1E8E2',
       fontSize: 12,
     },
 
@@ -4506,17 +4587,17 @@ const styles =
         7,
       borderRadius: 12,
       backgroundColor:
-        '#10192c',
+        '#111E1A',
       borderWidth: 1,
       borderColor:
-        '#263553',
+        '#116466',
     },
 
     diagnosticButton: {
       minHeight: 36,
       borderRadius: 18,
       backgroundColor:
-        '#202d4b',
+        '#116466',
       justifyContent:
         'center',
       alignItems:
@@ -4527,7 +4608,7 @@ const styles =
 
     diagnosticButtonActive: {
       backgroundColor:
-        '#394b78',
+        '#0E7778',
     },
 
     diagnosticButtonText: {
@@ -4540,7 +4621,7 @@ const styles =
 
     diagnosticStatus: {
       color:
-        '#b8c5dc',
+        '#D1E8E2',
       fontSize: 11,
       lineHeight: 16,
       textAlign:
@@ -4550,7 +4631,7 @@ const styles =
 
     diagnosticDetail: {
       color:
-        '#71819d',
+        '#94A3B8',
       fontSize: 10,
       textAlign:
         'center',
@@ -4577,7 +4658,7 @@ const styles =
       height: 10,
       borderRadius: 3,
       backgroundColor:
-        '#5d75ff',
+        '#FFCB9A',
     },
 
     waveBarTall: {
@@ -4612,10 +4693,10 @@ const styles =
         10,
       borderRadius: 12,
       backgroundColor:
-        '#151d31',
+        '#182C25',
       borderWidth: 1,
       borderColor:
-        '#242e44',
+        '#116466',
       alignItems:
         'center',
       justifyContent:
@@ -4624,9 +4705,9 @@ const styles =
 
     scenarioCardActive: {
       borderColor:
-        '#6578ff',
+        '#FFCB9A',
       backgroundColor:
-        '#1b2443',
+        '#203D33',
     },
 
     scenarioIcon: {
@@ -4635,7 +4716,7 @@ const styles =
 
     scenarioTitle: {
       color:
-        '#8f9aae',
+        '#94A3B8',
       fontSize: 10,
       fontWeight:
         '600',
@@ -4685,7 +4766,7 @@ const styles =
       height: 34,
       borderRadius: 17,
       backgroundColor:
-        '#202b46',
+        '#116466',
       alignItems:
         'center',
       justifyContent:
@@ -4710,17 +4791,19 @@ const styles =
 
     userBubble: {
       backgroundColor:
-        '#5368ed',
+        '#FFCB9A',
+      borderWidth: 1,
+      borderColor: '#FFCB9A',
       borderBottomRightRadius:
         4,
     },
 
     tutorBubble: {
       backgroundColor:
-        '#171f32',
-      borderWidth: 1,
+        '#182C25',
+      borderWidth: 1.5,
       borderColor:
-        '#28334b',
+        '#116466',
       borderBottomLeftRadius:
         4,
     },
@@ -4732,12 +4815,12 @@ const styles =
 
     userMessageText: {
       color:
-        '#ffffff',
+        '#0F1715',
     },
 
     tutorMessageText: {
       color:
-        '#e6eaf2',
+        '#E2E8F0',
     },
 
     messageActions: {
@@ -4749,7 +4832,7 @@ const styles =
       height: 34,
       borderRadius: 17,
       backgroundColor:
-        '#232d46',
+        '#116466',
       alignItems:
         'center',
       justifyContent:
@@ -4769,11 +4852,11 @@ const styles =
       padding: 10,
       borderRadius: 10,
       backgroundColor:
-        '#101729',
+        '#111E1A',
       borderLeftWidth:
         3,
       borderLeftColor:
-        '#6678ff',
+        '#FFCB9A',
     },
 
     correctionTitle: {
@@ -4794,7 +4877,7 @@ const styles =
 
     correctedText: {
       color:
-        '#6fe3a2',
+        '#4ADE80',
       fontSize: 12,
       lineHeight: 17,
       marginTop: 3,
@@ -4802,7 +4885,7 @@ const styles =
 
     explanationText: {
       color:
-        '#9ba6b9',
+        '#CBD5E1',
       fontSize: 11,
       lineHeight: 16,
       marginTop: 5,
@@ -4810,14 +4893,14 @@ const styles =
 
     scoreText: {
       color:
-        '#f4c96b',
+        '#FFCB9A',
       fontSize: 11,
       marginTop: 7,
     },
 
     tipText: {
       color:
-        '#91b6ff',
+        '#FFCB9A',
       fontSize: 11,
       lineHeight: 16,
       marginTop: 5,
@@ -4840,7 +4923,7 @@ const styles =
       height: 34,
       borderRadius: 17,
       backgroundColor:
-        '#202b46',
+        '#116466',
       justifyContent:
         'center',
       alignItems:
@@ -4850,7 +4933,7 @@ const styles =
 
     typingBubble: {
       backgroundColor:
-        '#171f32',
+        '#182C25',
       borderRadius: 16,
       paddingHorizontal:
         13,
@@ -4864,7 +4947,7 @@ const styles =
 
     typingText: {
       color:
-        '#8f9aae',
+        '#94A3B8',
       fontSize: 11,
       marginLeft: 8,
     },
@@ -4883,22 +4966,22 @@ const styles =
         7,
       borderRadius: 10,
       backgroundColor:
-        '#121a2d',
+        '#111E1A',
       borderWidth: 1,
       borderColor:
-        '#27324a',
+        '#116466',
     },
 
     interimLabel: {
       color:
-        '#69778f',
+        '#94A3B8',
       fontSize: 10,
       marginBottom: 2,
     },
 
     interimText: {
       color:
-        '#d8deea',
+        '#E2E8F0',
       fontSize: 13,
     },
 
@@ -4917,11 +5000,11 @@ const styles =
       paddingVertical:
         9,
       backgroundColor:
-        '#10172a',
+        '#111E1A',
       borderTopWidth:
-        1,
+        1.5,
       borderTopColor:
-        '#20283a',
+        '#116466',
       gap: 8,
     },
 
@@ -4930,7 +5013,7 @@ const styles =
       height: 48,
       borderRadius: 24,
       backgroundColor:
-        '#202b46',
+        '#116466',
       justifyContent:
         'center',
       alignItems:
@@ -4939,7 +5022,7 @@ const styles =
 
     micButtonActive: {
       backgroundColor:
-        '#c54858',
+        '#B94A48',
     },
 
     micIcon: {
@@ -4952,10 +5035,10 @@ const styles =
       maxHeight: 110,
       borderRadius: 23,
       backgroundColor:
-        '#171f32',
+        '#182C25',
       borderWidth: 1,
       borderColor:
-        '#29344c',
+        '#116466',
       color:
         '#ffffff',
       paddingHorizontal:
@@ -4970,7 +5053,7 @@ const styles =
       height: 46,
       borderRadius: 23,
       backgroundColor:
-        '#586cf0',
+        '#FFCB9A',
       justifyContent:
         'center',
       alignItems:
@@ -4983,7 +5066,7 @@ const styles =
 
     sendButtonText: {
       color:
-        '#ffffff',
+        '#0F1715',
       fontSize: 22,
       marginLeft: 2,
     },
@@ -5002,7 +5085,7 @@ const styles =
 
     voiceModal: {
       backgroundColor:
-        '#11182a',
+        '#111E1A',
       borderTopLeftRadius:
         24,
       borderTopRightRadius:
@@ -5024,7 +5107,7 @@ const styles =
       borderBottomWidth:
         1,
       borderBottomColor:
-        '#263149',
+        '#116466',
     },
 
     modalTitle: {
@@ -5052,10 +5135,10 @@ const styles =
       padding: 14,
       borderRadius: 12,
       backgroundColor:
-        '#182137',
+        '#182C25',
       borderWidth: 1,
       borderColor:
-        '#27334c',
+        '#116466',
       marginBottom: 8,
     },
 
@@ -5069,7 +5152,7 @@ const styles =
 
     voiceLanguage: {
       color:
-        '#8995aa',
+        '#94A3B8',
       fontSize: 11,
       marginTop: 3,
     },
@@ -5082,7 +5165,7 @@ const styles =
 
     emptyVoiceText: {
       color:
-        '#8c97aa',
+        '#94A3B8',
       fontSize: 13,
     },
   });
