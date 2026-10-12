@@ -3992,67 +3992,6 @@ export default function TutorChatScreen({
       {/* RAW MICROPHONE DIAGNOSTIC */}
       {/* ================================================== */}
 
-      <View
-        style={
-          styles.diagnosticContainer
-        }
-      >
-        <TouchableOpacity
-          style={[
-            styles.diagnosticButton,
-
-            micDiagnosticRunning &&
-              styles.diagnosticButtonActive,
-          ]}
-          disabled={
-            micDiagnosticRunning
-          }
-          onPress={
-            runMicrophoneDiagnostic
-          }
-        >
-          <Text
-            style={
-              styles.diagnosticButtonText
-            }
-          >
-            {micDiagnosticRunning
-              ? '🎤 Testing microphone...'
-              : '🔎 Test microphone'}
-          </Text>
-        </TouchableOpacity>
-
-        {micDiagnosticStatus ? (
-          <Text
-            style={
-              styles.diagnosticStatus
-            }
-          >
-            {micDiagnosticStatus}
-          </Text>
-        ) : null}
-
-        {micInputName ? (
-          <Text
-            style={
-              styles.diagnosticDetail
-            }
-          >
-            Input: {micInputName}
-          </Text>
-        ) : null}
-
-        {typeof micMetering ===
-        'number' ? (
-          <Text
-            style={
-              styles.diagnosticDetail
-            }
-          >
-            Audio level: {micMetering}
-          </Text>
-        ) : null}
-      </View>
 
 
       {/* ================================================== */}
