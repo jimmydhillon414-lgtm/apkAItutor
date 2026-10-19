@@ -66,6 +66,46 @@ const getLanguageCode = (language) => {
 };
 
 
+// Android does not expose reliable gender metadata for every TTS voice.
+// Only classify a voice when its name/identifier contains an explicit cue.
+const getVoiceGender = (voice) => {
+  const explicitGender = String(voice?.gender || '').toLowerCase();
+  if (explicitGender === 'female' || explicitGender === 'male') {
+    return explicitGender;
+  }
+
+  const description = `${voice?.name || ''} ${voice?.identifier || ''}`.toLowerCase();
+  if (/(^|[\s_#./-])(female|woman|women|girl)(?=$|[\s_#./-]|\d)/i.test(description)) {
+    return 'female';
+  }
+  if (/(^|[\s_#./-])(male|man|men|boy)(?=$|[\s_#./-]|\d)/i.test(description)) {
+    return 'male';
+  }
+  return 'unknown';
+};
+
+const VOICE_PREVIEW_TEXT = {
+  en: "Hello! I'm happy to practise with you. We'll take it one step at a time.",
+  de: 'Hallo! Schön, dass wir zusammen üben. Wir gehen Schritt für Schritt vor.',
+  hi: 'नमस्ते! मुझे आपके साथ अभ्यास करके खुशी हो रही है। हम धीरे-धीरे आगे बढ़ेंगे।',
+  pa: 'ਸਤ ਸ੍ਰੀ ਅਕਾਲ! ਮੈਨੂੰ ਤੁਹਾਡੇ ਨਾਲ ਅਭਿਆਸ ਕਰਕੇ ਖੁਸ਼ੀ ਹੋ ਰਹੀ ਹੈ। ਅਸੀਂ ਹੌਲੀ-ਹੌਲੀ ਅੱਗੇ ਵਧਾਂਗੇ।',
+  fr: 'Bonjour ! Je suis ravi de pratiquer avec vous. Nous allons avancer pas à pas.',
+  es: '¡Hola! Me alegra practicar contigo. Vamos a avanzar paso a paso.',
+  it: 'Ciao! Sono felice di esercitarmi con te. Procederemo un passo alla volta.',
+  ja: 'こんにちは。一緒に練習できてうれしいです。少しずつ進めていきましょう。',
+  zh: '你好！很高兴和你一起练习。我们一步一步来。',
+  pt: 'Olá! Fico feliz em praticar com você. Vamos avançar passo a passo.',
+  ru: 'Здравствуйте! Я рад заниматься с вами. Будем двигаться шаг за шагом.',
+  ko: '안녕하세요! 함께 연습하게 되어 기뻐요. 한 걸음씩 천천히 해 봐요.',
+  ar: 'مرحباً! يسعدني أن نتدرّب معاً. سنتقدم خطوة بخطوة.',
+};
+
+const getVoicePreviewText = (language) => {
+  const baseLanguage = String(language || 'en').toLowerCase().split('-')[0];
+  return VOICE_PREVIEW_TEXT[baseLanguage] || VOICE_PREVIEW_TEXT.en;
+};
+
+
 // ============================================================
 // ROLEPLAY SCENARIOS
 // ============================================================
@@ -78,11 +118,11 @@ const ROLEPLAY_SCENARIOS = {
       'Introduce yourself and have a basic conversation.',
   },
 
-  travel: {
-    title: 'Travel',
-    icon: '✈️',
+  vocabularyGame: {
+    title: 'Word Fall',
+    icon: '🎮',
     objective:
-      'Practice useful conversations while travelling.',
+      'Learn vocabulary by typing the word that matches the falling meaning.',
   },
 
   restaurant: {
@@ -115,6 +155,7 @@ const ROLEPLAY_SCENARIOS = {
 export default function TutorChatScreen({
   selectedDay,
   onBack,
+  onOpenVocabularyGame,
 }) {
   // ----------------------------------------------------------
   // DAY
@@ -154,6 +195,12 @@ export default function TutorChatScreen({
 
   const [availableVoices, setAvailableVoices] =
     useState([]);
+
+  const [voiceGenderFilter, setVoiceGenderFilter] =
+    useState('all');
+
+  const [previewingVoiceId, setPreviewingVoiceId] =
+    useState(null);
 
   const [showVoiceModal, setShowVoiceModal] =
     useState(false);
@@ -252,6 +299,9 @@ export default function TutorChatScreen({
 
   const preferredVoiceRef =
     useRef(null);
+
+  const voicePreviewTokenRef =
+    useRef(0);
 
   // Keep the same selected device voice for each language during this session.
   const voiceByLanguageRef =
@@ -794,6 +844,16 @@ export default function TutorChatScreen({
         voice.name ||
         null;
 
+      const selectedVoiceId = voice.identifier || voice.name || null;
+      const activeVoiceLanguage = String(speechLang || 'en-IN').toLowerCase();
+      const deviceVoiceLanguage = String(
+        voice.language || speechLang || 'en-IN'
+      ).toLowerCase();
+      if (selectedVoiceId) {
+        voiceByLanguageRef.current[activeVoiceLanguage] = selectedVoiceId;
+        voiceByLanguageRef.current[deviceVoiceLanguage] = selectedVoiceId;
+      }
+
       try {
         if (
           userIdRef.current
@@ -823,6 +883,87 @@ export default function TutorChatScreen({
         );
       }
     };
+
+
+  // ============================================================
+  // PREVIEW A DEVICE VOICE
+  // ============================================================
+
+  const previewVoice = async (voice) => {
+    if (!voice || !mountedRef.current) {
+      return;
+    }
+
+    const voiceId = voice.identifier || voice.name || 'voice-preview';
+    const previewToken = ++voicePreviewTokenRef.current;
+
+    try {
+      // Do not let the microphone listen to the tutor's preview audio.
+      if (recognitionRunningRef.current) {
+        await stopRecognition(true);
+      }
+
+      await Speech.stop();
+      if (previewToken !== voicePreviewTokenRef.current) {
+        return;
+      }
+      setPreviewingVoiceId(voiceId);
+
+      const finishPreview = () => {
+        // Ignore callbacks from a preview that was replaced by a newer one.
+        if (previewToken !== voicePreviewTokenRef.current) {
+          return;
+        }
+        if (mountedRef.current) {
+          setPreviewingVoiceId(null);
+        }
+
+        if (
+          mountedRef.current &&
+          sessionActiveRef.current &&
+          !sendingRef.current &&
+          !recognitionRunningRef.current &&
+          !micDiagnosticRunningRef.current
+        ) {
+          setTimeout(() => {
+            if (
+              mountedRef.current &&
+              sessionActiveRef.current &&
+              !sendingRef.current &&
+              !isSpeakingRef.current &&
+              !recognitionRunningRef.current &&
+              !micDiagnosticRunningRef.current
+            ) {
+              intentionalRecognitionStopRef.current = false;
+              startContinuousListening();
+            }
+          }, 450);
+        }
+      };
+
+      Speech.speak(getVoicePreviewText(voice.language), {
+        language: voice.language || speechLang || 'en-IN',
+        voice: voice.identifier || undefined,
+        rate: 0.9,
+        pitch: 1.0,
+        onDone: finishPreview,
+        onStopped: finishPreview,
+        onError: (error) => {
+          console.log('Voice preview failed:', error?.message || error);
+          finishPreview();
+          if (mountedRef.current) {
+            setVoiceError('This voice could not be previewed. Try another voice.');
+          }
+        },
+      });
+    } catch (error) {
+      console.log('Voice preview error:', error?.message || error);
+      if (mountedRef.current && previewToken === voicePreviewTokenRef.current) {
+        setPreviewingVoiceId(null);
+        setVoiceError('Unable to preview this voice. Please try another one.');
+      }
+    }
+  };
 
 
   // ============================================================
@@ -2297,8 +2438,10 @@ export default function TutorChatScreen({
             selectedVoice?.identifier ||
             undefined,
 
+          // Slightly slower pacing gives sentences room to breathe while
+          // staying close to normal conversation speed on Android TTS.
           rate:
-            0.95,
+            0.9,
 
           pitch:
             1.0,
@@ -2807,6 +2950,15 @@ export default function TutorChatScreen({
     async (
       scenarioKey
     ) => {
+      // The former Travel card now opens the separate vocabulary game.
+      // Do not save it as a roleplay scenario or change chat state.
+      if (scenarioKey === 'vocabularyGame') {
+        if (typeof onOpenVocabularyGame === 'function') {
+          onOpenVocabularyGame();
+        }
+        return;
+      }
+
       const scenario =
         ROLEPLAY_SCENARIOS[
           scenarioKey
@@ -3677,125 +3829,170 @@ export default function TutorChatScreen({
 
   const renderVoiceModal =
     () => {
+      const activeLanguage = String(speechLang || 'en-IN').toLowerCase();
+      const activeBaseLanguage = activeLanguage.split('-')[0];
+      const exactLanguageVoices = availableVoices.filter(
+        (voice) => String(voice?.language || '').toLowerCase() === activeLanguage
+      );
+      const sameLanguageVoices = availableVoices.filter(
+        (voice) => String(voice?.language || '').toLowerCase().split('-')[0] === activeBaseLanguage
+      );
+      const languageVoices = exactLanguageVoices.length
+        ? exactLanguageVoices
+        : sameLanguageVoices;
+      const sourceVoices = languageVoices.length ? languageVoices : availableVoices;
+      const filteredVoices = sourceVoices.filter((voice) =>
+        voiceGenderFilter === 'all' || getVoiceGender(voice) === voiceGenderFilter
+      );
+
       return (
         <Modal
-          visible={
-            showVoiceModal
-          }
+          visible={showVoiceModal}
           transparent
           animationType="slide"
-          onRequestClose={() =>
-            setShowVoiceModal(
-              false
-            )
-          }
+          onRequestClose={() => {
+            setShowVoiceModal(false);
+            setVoiceError('');
+          }}
         >
-          <View
-            style={
-              styles.modalOverlay
-            }
-          >
-            <View
-              style={
-                styles.voiceModal
-              }
-            >
-              <View
-                style={
-                  styles.modalHeader
-                }
-              >
-                <Text
-                  style={
-                    styles.modalTitle
-                  }
-                >
-                  Select Tutor Voice
-                </Text>
-
+          <View style={styles.modalOverlay}>
+            <View style={styles.voiceModal}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Choose Tutor Voice</Text>
                 <TouchableOpacity
-                  onPress={() =>
-                    setShowVoiceModal(
-                      false
-                    )
-                  }
+                  accessibilityRole="button"
+                  accessibilityLabel="Close voice settings"
+                  onPress={() => {
+                    setShowVoiceModal(false);
+                    setVoiceError('');
+                  }}
                 >
-                  <Text
-                    style={
-                      styles.closeButton
-                    }
-                  >
-                    ✕
-                  </Text>
+                  <Text style={styles.closeButton}>✕</Text>
                 </TouchableOpacity>
               </View>
 
-              <ScrollView
-                style={
-                  styles.voiceList
-                }
-              >
-                {availableVoices.length ===
-                0 ? (
-                  <View
-                    style={
-                      styles.emptyVoiceBox
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.emptyVoiceText
-                      }
+              <Text style={styles.voiceModalHint}>
+                Choose a voice for {activeLanguage}. Tap Preview to hear it, then select Use voice.
+              </Text>
+
+              <View style={styles.voiceFilterRow}>
+                {[
+                  { label: 'All voices', value: 'all' },
+                  { label: 'Female', value: 'female' },
+                  { label: 'Male', value: 'male' },
+                ].map((option) => {
+                  const active = voiceGenderFilter === option.value;
+                  return (
+                    <TouchableOpacity
+                      key={option.value}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      style={[
+                        styles.voiceFilterButton,
+                        active && styles.voiceFilterButtonActive,
+                      ]}
+                      onPress={() => setVoiceGenderFilter(option.value)}
                     >
-                      No device voices found.
+                      <Text
+                        style={[
+                          styles.voiceFilterText,
+                          active && styles.voiceFilterTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <ScrollView style={styles.voiceList} keyboardShouldPersistTaps="handled">
+                {availableVoices.length === 0 ? (
+                  <View style={styles.emptyVoiceBox}>
+                    <Text style={styles.emptyVoiceText}>
+                      No device voices found. Check that a text-to-speech voice is installed in your Android settings.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.voiceSecondaryButton}
+                      onPress={loadDeviceVoices}
+                    >
+                      <Text style={styles.voiceActionText}>Reload voices</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : filteredVoices.length === 0 ? (
+                  <View style={styles.emptyVoiceBox}>
+                    <Text style={styles.emptyVoiceText}>
+                      Your device does not clearly identify any {voiceGenderFilter} voices for this language. Try All voices; some Android voices do not include gender information in their names.
                     </Text>
                   </View>
                 ) : (
-                  availableVoices.map(
-                    (
-                      voice,
-                      index
-                    ) => (
-                      <TouchableOpacity
-                        key={
-                          voice.identifier ||
-                          `${voice.name}-${index}`
-                        }
-                        style={
-                          styles.voiceItem
-                        }
-                        onPress={() => {
-                          updatePreferredVoice(
-                            voice
-                          );
+                  filteredVoices.map((voice, index) => {
+                    const voiceId = voice.identifier || voice.name || `${voice.name}-${index}`;
+                    const isSelected = preferredVoiceRef.current === voiceId;
+                    const isPreviewing = previewingVoiceId === voiceId;
+                    const gender = getVoiceGender(voice);
 
-                          setShowVoiceModal(
-                            false
-                          );
-                        }}
-                      >
-                        <Text
-                          style={
-                            styles.voiceName
-                          }
-                        >
-                          {voice.name ||
-                            'Voice'}
-                        </Text>
+                    return (
+                      <View key={voiceId} style={styles.voiceItem}>
+                        <View style={styles.voiceItemHeader}>
+                          <View style={styles.voiceDetails}>
+                            <Text style={styles.voiceName}>
+                              {voice.name || 'Device voice'}
+                            </Text>
+                            <Text style={styles.voiceLanguage}>
+                              {voice.language || 'Language not specified'}
+                              {gender !== 'unknown' ? ` • ${gender === 'female' ? 'Female' : 'Male'} voice` : ''}
+                              {voice.quality ? ` • ${voice.quality}` : ''}
+                            </Text>
+                          </View>
+                          {isSelected ? (
+                            <Text style={styles.voiceSelectedText}>Selected</Text>
+                          ) : null}
+                        </View>
 
-                        <Text
-                          style={
-                            styles.voiceLanguage
-                          }
-                        >
-                          {voice.language ||
-                            'Unknown language'}
-                        </Text>
-                      </TouchableOpacity>
-                    )
-                  )
+                        <View style={styles.voiceItemActions}>
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel={`Preview ${voice.name || 'voice'}`}
+                            style={[
+                              styles.voiceSecondaryButton,
+                              isPreviewing && styles.voiceActionButtonDisabled,
+                            ]}
+                            disabled={isPreviewing}
+                            onPress={() => previewVoice(voice)}
+                          >
+                            <Text style={styles.voiceActionText}>
+                              {isPreviewing ? 'Playing…' : '▶ Preview'}
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel={`Use ${voice.name || 'voice'}`}
+                            style={[
+                              styles.voicePrimaryButton,
+                              isSelected && styles.voicePrimaryButtonSelected,
+                            ]}
+                            onPress={async () => {
+                              await updatePreferredVoice(voice);
+                              setVoiceError('');
+                              setShowVoiceModal(false);
+                            }}
+                          >
+                            <Text style={styles.voiceActionText}>
+                              {isSelected ? 'Using voice' : 'Use voice'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })
                 )}
               </ScrollView>
+
+              <Text style={styles.voiceModalFootnote}>
+                Voice quality depends on the voices installed on your phone. For more natural speech, check Android Settings → Text-to-speech output and install an enhanced voice if available.
+              </Text>
             </View>
           </View>
         </Modal>
@@ -3986,12 +4183,6 @@ export default function TutorChatScreen({
           </Text>
         ) : null}
       </View>
-
-
-      {/* ================================================== */}
-      {/* RAW MICROPHONE DIAGNOSTIC */}
-      {/* ================================================== */}
-
 
 
       {/* ================================================== */}
@@ -4280,7 +4471,7 @@ export default function TutorChatScreen({
               ? 'Speak now...'
               : 'Type your message...'
           }
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor="#7d8494"
           multiline
           editable={
             !loading
@@ -4356,7 +4547,7 @@ const styles =
       paddingHorizontal:
         16,
       borderBottomWidth:
-        1.5,
+        1,
       borderBottomColor:
         '#116466',
       backgroundColor:
@@ -4372,7 +4563,7 @@ const styles =
       alignItems:
         'center',
       backgroundColor:
-        '#116466',
+        '#182C25',
     },
 
     backButtonText: {
@@ -4413,7 +4604,7 @@ const styles =
       alignItems:
         'center',
       backgroundColor:
-        '#116466',
+        '#182C25',
     },
 
     voiceSettingsText: {
@@ -4451,7 +4642,7 @@ const styles =
 
     dayBannerSubtitle: {
       color:
-        '#94A3B8',
+        '#D1E8E2',
       fontSize: 12,
       marginTop: 5,
       maxWidth: 290,
@@ -4499,13 +4690,13 @@ const styles =
 
     voiceStatusText: {
       color:
-        '#D1E8E2',
+        '#94A3B8',
       fontSize: 12,
     },
 
     voiceErrorText: {
       color:
-        '#ff8c8c',
+        '#FCA5A5',
       fontSize: 11,
       marginTop: 3,
       textAlign:
@@ -4547,7 +4738,7 @@ const styles =
 
     diagnosticButtonActive: {
       backgroundColor:
-        '#0E7778',
+        '#0F1715',
     },
 
     diagnosticButtonText: {
@@ -4646,7 +4837,7 @@ const styles =
       borderColor:
         '#FFCB9A',
       backgroundColor:
-        '#203D33',
+        '#24443A',
     },
 
     scenarioIcon: {
@@ -4730,9 +4921,7 @@ const styles =
 
     userBubble: {
       backgroundColor:
-        '#FFCB9A',
-      borderWidth: 1,
-      borderColor: '#FFCB9A',
+        '#116466',
       borderBottomRightRadius:
         4,
     },
@@ -4740,7 +4929,7 @@ const styles =
     tutorBubble: {
       backgroundColor:
         '#182C25',
-      borderWidth: 1.5,
+      borderWidth: 1,
       borderColor:
         '#116466',
       borderBottomLeftRadius:
@@ -4754,7 +4943,7 @@ const styles =
 
     userMessageText: {
       color:
-        '#0F1715',
+        '#ffffff',
     },
 
     tutorMessageText: {
@@ -4809,7 +4998,7 @@ const styles =
 
     originalText: {
       color:
-        '#ff9b9b',
+        '#FCA5A5',
       fontSize: 12,
       lineHeight: 17,
     },
@@ -4824,7 +5013,7 @@ const styles =
 
     explanationText: {
       color:
-        '#CBD5E1',
+        '#94A3B8',
       fontSize: 11,
       lineHeight: 16,
       marginTop: 5,
@@ -4839,7 +5028,7 @@ const styles =
 
     tipText: {
       color:
-        '#FFCB9A',
+        '#D1E8E2',
       fontSize: 11,
       lineHeight: 16,
       marginTop: 5,
@@ -4908,7 +5097,7 @@ const styles =
         '#111E1A',
       borderWidth: 1,
       borderColor:
-        '#116466',
+        '#27324a',
     },
 
     interimLabel: {
@@ -4941,7 +5130,7 @@ const styles =
       backgroundColor:
         '#111E1A',
       borderTopWidth:
-        1.5,
+        1,
       borderTopColor:
         '#116466',
       gap: 8,
@@ -4961,7 +5150,7 @@ const styles =
 
     micButtonActive: {
       backgroundColor:
-        '#B94A48',
+        '#c54858',
     },
 
     micIcon: {
@@ -5005,7 +5194,7 @@ const styles =
 
     sendButtonText: {
       color:
-        '#0F1715',
+        '#ffffff',
       fontSize: 22,
       marginLeft: 2,
     },
@@ -5064,21 +5253,131 @@ const styles =
       fontSize: 22,
     },
 
+    voiceModalHint: {
+      color: '#D1E8E2',
+      fontSize: 12,
+      lineHeight: 18,
+      paddingHorizontal: 18,
+      paddingTop: 12,
+      paddingBottom: 8,
+    },
+
+    voiceFilterRow: {
+      flexDirection: 'row',
+      paddingHorizontal: 15,
+      paddingBottom: 8,
+      gap: 8,
+    },
+
+    voiceFilterButton: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 38,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: '#116466',
+      backgroundColor: '#182C25',
+      paddingHorizontal: 8,
+    },
+
+    voiceFilterButtonActive: {
+      backgroundColor: '#116466',
+      borderColor: '#FFCB9A',
+    },
+
+    voiceFilterText: {
+      color: '#D1E8E2',
+      fontSize: 12,
+      fontWeight: '600',
+    },
+
+    voiceFilterTextActive: {
+      color: '#ffffff',
+    },
+
+    voiceModalFootnote: {
+      color: '#94A3B8',
+      fontSize: 11,
+      lineHeight: 16,
+      paddingHorizontal: 18,
+      paddingTop: 8,
+      paddingBottom: 10,
+    },
+
     voiceList: {
-      paddingHorizontal:
-        15,
+      paddingHorizontal: 15,
       paddingTop: 10,
+      flexGrow: 0,
     },
 
     voiceItem: {
-      padding: 14,
+      padding: 12,
       borderRadius: 12,
-      backgroundColor:
-        '#182C25',
+      backgroundColor: '#182C25',
       borderWidth: 1,
-      borderColor:
-        '#116466',
+      borderColor: '#116466',
       marginBottom: 8,
+    },
+
+    voiceItemHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+    },
+
+    voiceDetails: {
+      flex: 1,
+    },
+
+    voiceSelectedText: {
+      color: '#FFCB9A',
+      fontSize: 11,
+      fontWeight: '700',
+      paddingTop: 2,
+    },
+
+    voiceItemActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 8,
+      marginTop: 10,
+    },
+
+    voiceSecondaryButton: {
+      minHeight: 34,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: '#116466',
+      paddingHorizontal: 12,
+      backgroundColor: '#182C25',
+    },
+
+    voicePrimaryButton: {
+      minHeight: 34,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 9,
+      paddingHorizontal: 12,
+      backgroundColor: '#116466',
+    },
+
+    voicePrimaryButtonSelected: {
+      backgroundColor: '#24443A',
+      borderWidth: 1,
+      borderColor: '#FFCB9A',
+    },
+
+    voiceActionButtonDisabled: {
+      opacity: 0.65,
+    },
+
+    voiceActionText: {
+      color: '#ffffff',
+      fontSize: 11,
+      fontWeight: '700',
     },
 
     voiceName: {

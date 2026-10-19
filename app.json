@@ -40,6 +40,12 @@
     "plugins": [
       "expo-audio",
       "expo-speech-recognition"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a472222f-9995-4a13-8247-603c41a889a8"
+      }
+    },
+    "owner": "jimmydhillon414"
   }
 }

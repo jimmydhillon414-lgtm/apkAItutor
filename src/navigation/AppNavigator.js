@@ -17,6 +17,7 @@ import HomeScreen from '../screens/HomeScreen';
 import PricingScreen from '../screens/PricingScreen';
 import RoadmapScreen from '../screens/RoadmapScreen';
 import TutorChatScreen from '../screens/TutorChatScreen';
+import VocabularyGameScreen from '../screens/VocabularyGameScreen';
 import GrammarHistoryScreen from '../screens/GrammarHistoryScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 
@@ -379,6 +380,21 @@ export default function AppNavigator() {
   // =========================================================
   // BACK FROM CHAT -> ROADMAP
   // =========================================================
+  // FALLING VOCABULARY GAME NAVIGATION
+  const handleOpenVocabularyGame = () => {
+    setCurrentStep('vocabulary-game');
+    setActiveTab('AI Tutor');
+    updateSessionStorage('ai_tutor_current_step', 'vocabulary-game');
+    updateSessionStorage('ai_tutor_active_tab', 'AI Tutor');
+  };
+
+  const handleBackFromVocabularyGame = () => {
+    setCurrentStep('chat');
+    setActiveTab('AI Tutor');
+    updateSessionStorage('ai_tutor_current_step', 'chat');
+    updateSessionStorage('ai_tutor_active_tab', 'AI Tutor');
+  };
+
   const handleBackToRoadmap = () => {
     console.log(
       'Returning to Roadmap'
@@ -555,6 +571,12 @@ export default function AppNavigator() {
     //
     // MUST BE BEFORE ROADMAP
     // =======================================================
+    if (currentStep === 'vocabulary-game') {
+      return (
+        <VocabularyGameScreen onBack={handleBackFromVocabularyGame} />
+      );
+    }
+
     if (
       currentStep === 'chat'
     ) {
@@ -571,6 +593,7 @@ export default function AppNavigator() {
           onBack={
             handleBackToRoadmap
           }
+          onOpenVocabularyGame={handleOpenVocabularyGame}
           onSignOut={
             handleSignOut
           }
